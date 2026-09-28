@@ -25,6 +25,27 @@ dshctl add desk  --type dsh     --host 192.168.1.10 --port 7788 --token <TOKEN>
 
 `--type dsh` 已在 `dshctl` 里落地，方便 devctl 主仓库日后直接接管这条通道；本仓库不修改 devctl。
 
+## 图形界面：Android 客户端 `dshconsole`
+
+这个仓库里还带了一个**原生 Android 客户端**（[`clients/dshconsole/`](clients/dshconsole/)）：单 Activity、纯 Java + 手写 View、不依赖 AndroidX / Compose，产物 ~86 KB。它和 CLI 走**同一套协议、同一个配对 token**，两边可以混着用——PC 上敲命令、手机上看流式，看的是同一个会话。
+
+- **思考块**：`✦ 思考 · N 字 ▸` 默认折叠，流式期间只在标题下露最新一行，想看全文点一下
+- **模式栏**：输入框上方一排胶囊直接切 模型 / 思考强度 / 权限，不用进设置
+- **两种发送**：`↑` 排队等本回合结束（本地挂起，气泡左侧标 `⏎`，回合结束自动放行）；`⏎` 立刻插话（`steer`）
+- **工具调用折叠**：连续的 tool-call / tool-result 自动收成一张 `⚙ 工具调用 ×N · M 字` 卡，点标题整体展开
+- **连接自愈**：断线自动重连并重新 watch，长对话不卡不抖
+- **正文排版**：markdown（粗体 / 行内代码 / 标题 / 列表 / 引用）+ 真表格，规格照 Minis 的聊天界面来
+
+构建不需要 Android SDK，Linux 沙箱里就能出包：
+
+```bash
+cd clients/dshconsole
+python3 build.py        # → out/dshconsole.apk
+adb install -r out/dshconsole.apk
+```
+
+更多细节（协议要点、已知边界、调试开关）见 [clients/dshconsole/README.md](clients/dshconsole/README.md)。
+
 ## 被控端：安装插件
 
 ```bash

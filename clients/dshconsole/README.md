@@ -1,17 +1,29 @@
 # dshconsole
 
-`dsh` host（devctl-dsh）的 **Android 原生客户端**。单个 Activity，纯 Java + 手写 View，不依赖 AndroidX / Compose，编译产物 ~76 KB。
+`dsh` host（devctl-dsh）的 **Android 原生客户端**。单个 Activity，纯 Java + 手写 View，不依赖 AndroidX / Compose，编译产物 ~86 KB。
 
 ## 功能
 
-- **多设备管理**：粘贴 `dshctl add <name> <host:port> --token <hex>` 就能自动解析配对信息
-- **侧栏**：工作区可展开成父节点（子会话挂在下面）、会话搜索、设备/事件/模型权限/设置抽屉
-- **聊天**：流式正文、markdown（粗体 / 行内代码 / 标题 / 列表 / 引用 / **真表格**）、工具调用与结果折叠卡、运行期注入上下文单独成块
-- **工具组**：连续的工具调用 / 结果自动收成一张 `⚙ 工具调用 ×N · M 字` 卡，点标题整体展开；组内条目收起时从视图树摘除，不占高度
-- **展开不跳底**：任何卡片原地展开 / 收起（记住点击那一刻的位置，重排后还原）
-- **发送模式**：默认排队等本回合结束（↑）；`⏎` 立刻插话（`steer`）
-- **思考内容**：host 放行 `reasoning-delta` 后渲染成 `✦ 思考` 折叠块（见 `host-patch/`）
+### 对话
+
+- **思考块**：正文之前的 `✦ 思考 · N 字 ▸` **默认折叠**；流式期间只在标题下显示**最新一行**（超 60 字前缀省略号、`Ellipsize.START`），点标题才展开全文；回合结束后预览行隐藏，块保持折叠但随时可再展开
+- **流式正文** + markdown：粗体 / 行内代码 / 标题 / 列表 / 引用 / 删除线 / **真表格**（按 Minis 规格：外框圆角 + 列间发丝线 + 表头底色 + 单元格递归渲染行内标记，窄屏横向可滚）
+- **工具卡**：连续的工具调用 / 结果自动收成一张 `⚙ 工具调用 ×N · M 字` 卡，点标题整体展开；组内条目会在收起时从视图树摘除，不占高度
+- **原地展开**：任何卡片展开 / 收起都记住点击那一刻的位置，重排后还原，不跳底
+- **自动跟随**：非强制场景用瞬时滚动 + 尾部补滚（trailing-edge），流式期间不抖动；用户手动往上翻时不会被硬拽回底部
+
+### 输入与发送
+
+- **模式栏**：输入框上方一排可横滚胶囊，直接切 `模型 / 思考强度 / 权限`；档位来自 `models.catalog` 的 `reasoning.efforts`，权限预设取自 `permissions.catalog`
+- **发送模式**：默认 `↑` **本地挂起**（气泡左侧标 `⏎`），等当前回合结束自动合并放行；按 `⏎` 则 `steer` 立即插进当前回合。协议没有撤回已排队消息的方法，所以这条消息在放行前只存在本地
+- **复制**：每条消息右上角一键复制原文
+
+### 连接与管理
+
+- **多设备**：粘贴 `dshctl add <name> <host:port> --token <hex>` 即可自动解析配对信息
+- **侧栏**：工作区展开成父节点（子会话挂在下面）、会话搜索、设备 / 事件 / 模型权限 / 设置抽屉
 - **连接自愈**：短连接 + 失败自动重连重试；流式断开自动重新 `sessions.watch`
+- **调试**：把 `TabChat.DEBUG_FRAMES` 置 true，帧级事件会写进 `files/frames.log`（`reasoning` / `R-render` / `T-pass` 三类标记，256KB 封顶）。排查「流式没内容」时，先看这份日志能直接分清是帧没到、还是到了没画
 
 ## 构建
 
@@ -33,7 +45,8 @@ python3 build.py        # 产物 out/dshconsole.apk
 - `sessions.tail` 只有 `limit`（≤500），**没有游标翻页**参数 → 客户端做不了「加载更早」
 - `describeRecord` 是「能显示什么」的天花板：未知事件只给 `{kind:'event',type}`，`data` 会被丢掉
 - 运行期上下文注入是以 **user 记录**下发的，协议里没有标记位 → 客户端只能自己用启发式识别
-- `assistant-stream` 只转发 `text-delta`（`index.js`），**`reasoning-delta` 会被丢弃** → 想显示思考内容必须打 `host-patch/` 里的补丁
+- `assistant-stream` 的 `reasoning-delta` 已在 host 侧放行（见 #1，`host-patch/` 保留作说明）→ 思考内容可以实时渲染；**注意它必须排在回合门之前处理**，否则 PC / CLI 侧发起的回合在手机上永远看不到思考
+- `models.select` 要**扁平**参数 `{sessionId, provider, model, reasoningEffort?}`，且 provider / model 必须传 `id` 而不是 `name`；`permissions.set` 只要 `{sessionId, preset}`
 
 ## 目录
 
