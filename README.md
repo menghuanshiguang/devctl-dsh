@@ -40,7 +40,7 @@ netstat -ano | findstr :7788
 首次启动生成 token 并写入 `%USERPROFILE%\.dsh\devctl-dsh.json`：
 
 ```json
-{ "token": "7fb9b946…", "host": "0.0.0.0", "port": 7788, "version": "1.2.0", "startedAt": 1790610287877 }
+{ "token": "7fb9b946…", "host": "0.0.0.0", "port": 7788, "version": "1.2.1", "startedAt": 1790610287877 }
 ```
 
 改端口 / 绑定地址：编辑本包 `cordis.patch.yml` 的 `config`，或在 profile 补丁层覆盖同一 `id`。
@@ -77,7 +77,7 @@ curl -O http://192.168.2.7:7799/dshctl.py
 python3 dshctl.py add desk --host 192.168.2.7 --port 7788 --token 7fb9b946…
 ```
 
-iSH 装 Python：`apk add python3`；Termux：`pkg install python`。
+iSH 装 Python：`apk add python3`；Termux：`pkg install python`。iSH 自带的是个很旧的 Alpine 快照，得先换源才有能用的 python3——完整步骤在 [docs/ish.md](docs/ish.md)。
 
 `add` 之后 `--token` 只在第一次需要——同机运行时能自动读 `$DSH_HOME/devctl-dsh.json`。
 
@@ -195,7 +195,7 @@ JSON Lines over TCP，请求与响应按 `id` 配对，事件不请自来。
 
 ```jsonc
 // 鉴权（必须是第一条；失败即断开）；device 是控制端自报的身份，只用于设备列表
-{"id":1,"method":"hello","params":{"token":"…","client":"dshctl/1.2.0","device":{"name":"phone","platform":"Darwin 24.0","version":"1.2.0","cwd":"/root"}}}
+{"id":1,"method":"hello","params":{"token":"…","client":"dshctl/1.2.1","device":{"name":"phone","platform":"Darwin 24.0","version":"1.2.1","cwd":"/root"}}}
 
 // 请求 → 响应
 {"id":2,"method":"sessions.prompt","params":{"sessionId":"…","mode":"queue","text":"…","images":[{"mediaType":"image/png","data":"<base64>","name":"shot.png"}]}}
@@ -233,6 +233,27 @@ profile 补丁层给 `dsh-hmr` 扩了监视根，插件源码目录纳入热重�
 
 客户端那半（`client.js`）走 DSH 自己的 bundle 图：HMR 轮询它的文件时间戳，变了就推送新 rev 给浏览器。**但有一个例外**——DSH 把「这个包是不是客户端包」的判定按 loader 行缓存到进程重启为止，所以给一个**已经在跑的** DSH 首次加上 `dsh.client` 声明时，那个否定的旧判定会让 `client.js` 一直不进图。`index.js` 里的 `refreshClientBundleGraph` 就处理这一件事：清掉这条判定并让图重新协调本包。全新启动的 DSH 上它是空操作。
 
+## 无 UI 的机器
+
+被控端没有桌面环境（服务器、容器、小主机）时照常跑，但要显式关掉浏览器、选对 profile：
+
+```bash
+dsh --profile remote --from-default-profile web --dump-config   # 从一个自带模板建 profile
+dsh --profile remote --port 3081 --host 0.0.0.0 --no-open       # 起服务
+```
+
+`--no-open` 是给没有浏览器的机器用的；`dsh web` 会把 launch token 直接打在 stdout：
+
+```
+dsh web: http://127.0.0.1:3081/?token=…
+```
+
+那个 token 是给**浏览器**用的。它和 TCP 端口那两个鉴权各走各的路——但 profile 共用同一个状态文件 `$DSH_HOME/devctl-dsh.json`，所以桌面端和 remote profile 上的 `dshctl` 用的是同一个 token。
+
+**`--profile headless` 不行**：那个 bundle 里没有 Host、没有 `sessionController`，本插件不会被激活。要的是带 `dsh-web-app` 的 profile。
+
+在缺 native 模块的架构上（iOS 的 iSH 就是这种：x86 Alpine，既没有 `linux-ia32` 也没有 musl 的预编译包），`dsh` 需要显式带上 `--expose-internals`——DSH 自带的 `node-addon-require-builtin` 那两个 `require` 都被 try/catch 吞掉，落到「no-internals path」时要靠这个 flag 顶住 HMR，否则启动会中止在 `--expose-internals is required for HMR service`。依赖树里另外三个原生包（`koffi` / `node-pty` / `sharp`）是硬依赖，没有纯 JS 回退，细节见 [docs/ish.md](docs/ish.md)。
+
 ## 安全边界
 
 - **token 等于整台机器的控制权。** 它能列出、创建、驱动本机上的任意会话，等于让远端以本机身份执行任务。
@@ -259,6 +280,8 @@ New-NetFirewallRule -DisplayName "devctl-dsh" -Direction Inbound -Protocol TCP `
 | `client.js` | 设置页的 devctl 分区（端口 / IP / 二维码 / 设备表） |
 | `qr.js` | 纯 JS 二维码编码器，无依赖 |
 | `cli/dshctl.py` | 控制端 CLI，单文件零依赖 |
+| `docs/ish.md` | iSH / 纯命令行环境：安装、配对、无 UI 部署、排查 |
+| `docs/settings.png` | README 顶部的设置页截图 |
 | `cordis.patch.yml` | 加载器补丁：`host` / `port` |
 | `package.json` | bundle 清单 |
 

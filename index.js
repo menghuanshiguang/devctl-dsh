@@ -15,7 +15,7 @@ import { homedir, hostname, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
 import { svg as qrSvg } from './qr.js'
 
-const VERSION = '1.2.0'
+const VERSION = '1.2.1'
 const PROTOCOL = 1
 /** This package's name: the loader row id, the client bundle id, and the graph key. */
 const PACKAGE_NAME = 'devctl-dsh'
@@ -616,12 +616,41 @@ function sendJson(response, status, payload) {
 }
 
 /**
+ * These routes hand out the access token, so they have to clear the same
+ * Host/Origin fence and browser cookie as `/api` — `connection` owns that
+ * check and its `requestRejection` returns undefined, 401, or 403. Borrowing
+ * it keeps this page exactly as strict as the surface it lives in. The
+ * route only registers where that service exists; a Host composing the web
+ * server without the connection carrier gets no settings page at all.
+ */
+function rejectUntrustedRequest(connection, request, response) {
+  let rejection
+  try {
+    rejection = connection.requestRejection(request) ?? undefined
+  } catch (error) {
+    rejection = 500
+  }
+  if (rejection === undefined) return false
+  const text =
+    rejection === 500
+      ? 'devctl-dsh: the browser-trust check failed\n'
+      : 'devctl-dsh: authentication required\n'
+  response.writeHead(rejection, {
+    'cache-control': 'no-store',
+    'content-type': 'text/plain; charset=utf-8',
+    'content-length': String(Buffer.byteLength(text)),
+  })
+  response.end(request.method === 'HEAD' ? undefined : text)
+  return true
+}
+
+/**
  * The settings page is served by the Host web server, so it reads this plugin
  * through the same origin instead of reaching across the TCP port.
  */
 function installSettingsRoutes(ctx, bridge) {
   if (typeof ctx?.inject !== 'function') return
-  ctx.inject(['webServer'], (host) => {
+  ctx.inject(['webServer', 'connection'], (host) => {
     if (typeof host?.webServer?.register !== 'function') return
     host.effect(
       () => {
@@ -633,11 +662,15 @@ function installSettingsRoutes(ctx, bridge) {
             bridge.warn?.(error)
           }
         }
+        const guarded = (handler) => (request, response) => {
+          if (rejectUntrustedRequest(host.connection, request, response)) return
+          handler(request, response)
+        }
         add(
           {
             kind: 'exact',
             path: STATUS_PATH,
-            handler: (request, response) => {
+            handler: guarded((request, response) => {
               if (request.method !== 'GET' && request.method !== 'HEAD') {
                 response.writeHead(405, { allow: 'GET' })
                 response.end()
@@ -649,7 +682,7 @@ function installSettingsRoutes(ctx, bridge) {
                 bridge.warn?.(error)
                 sendJson(response, 500, { ok: false, error: errorText(error) })
               }
-            },
+            }),
           },
           'devctl-dsh: settings status',
         )
@@ -657,7 +690,7 @@ function installSettingsRoutes(ctx, bridge) {
           {
             kind: 'exact',
             path: QR_PATH,
-            handler: (request, response) => {
+            handler: guarded((request, response) => {
               if (request.method !== 'GET' && request.method !== 'HEAD') {
                 response.writeHead(405, { allow: 'GET' })
                 response.end()
@@ -687,7 +720,7 @@ function installSettingsRoutes(ctx, bridge) {
                 response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
                 response.end('qr unavailable')
               }
-            },
+            }),
           },
           'devctl-dsh: pairing QR',
         )

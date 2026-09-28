@@ -30,7 +30,7 @@ import socket
 import sys
 import time
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 PROTOCOL = 1
 DEFAULT_PORT = 7788
 DEFAULT_TIMEOUT = 30.0
@@ -418,23 +418,44 @@ def _human_duration(milliseconds):
     return "%dh %dm" % (seconds // 3600, (seconds % 3600) // 60)
 
 
-def device_identity():
-    """What the Host lists this machine as on its devctl settings page."""
+def platform_label():
+    """A recognisable OS name — `/etc/os-release` on Linux, the platform tuple elsewhere."""
     try:
-        label = ("%s %s" % (platform.system(), platform.release())).strip()
+        with open("/etc/os-release", "r") as handle:
+            for line in handle:
+                if line.startswith("PRETTY_NAME="):
+                    value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if value:
+                        return value
     except Exception:
-        label = sys.platform
+        pass
+    try:
+        return ("%s %s" % (platform.system(), platform.release())).strip() or sys.platform
+    except Exception:
+        return sys.platform
+
+
+def device_identity():
+    """What the Host lists this machine as on its devctl settings page.
+
+    DSHCTL_NAME overrides the reported name: a phone shell that answers
+    ``localhost`` to gethostname would otherwise be indistinguishable from the
+    next one in the device list.
+    """
     try:
         name = socket.gethostname() or "unknown"
     except Exception:
         name = "unknown"
+    override = os.environ.get("DSHCTL_NAME", "").strip()
+    if override:
+        name = override
     try:
         cwd = os.getcwd()
     except Exception:
         cwd = ""
     return {
         "name": name,
-        "platform": label or sys.platform,
+        "platform": platform_label(),
         "version": VERSION,
         "cwd": cwd,
     }
