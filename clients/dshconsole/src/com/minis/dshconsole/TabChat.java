@@ -62,6 +62,10 @@ public class TabChat extends Tab {
         box.addView(cv, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        box.addView(modeStrip(), mlp);
+
         LinearLayout bar = Ui.row(act);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setBackgroundColor(Ui.PANEL);
@@ -101,6 +105,429 @@ public class TabChat extends Tab {
         bar.addView(sendBtn);
         box.addView(bar);
         return box;
+    }
+
+    // ==================== 模式栏：模型 / 思考强度 / 工作区权限 ====================
+    private JSONArray modelGroups;
+    private JSONArray permCatalog;
+    private String curProvider = "", curModel = "", curEffort = "", curPerm = "";
+    private LinearLayout modeBar;
+
+    interface Pick { void pick(String value); }
+
+    /** 输入框上方一行可横滚的胶囊。 */
+    private View modeStrip() {
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(act);
+        hs.setHorizontalScrollBarEnabled(false);
+        modeBar = Ui.row(act);
+        modeBar.setGravity(Gravity.CENTER_VERTICAL);
+        int p = Ui.dp(act, 8);
+        modeBar.setPadding(p, Ui.dp(act, 6), p, Ui.dp(act, 4));
+        modeBar.setBackgroundColor(Ui.PANEL);
+        hs.addView(modeBar);
+        rebuildChips();
+        // 打开会话后 sessionId 才有效，稍后再同步一次真实状态
+        hs.postDelayed(new Runnable() {
+            public void run() { refreshMode(); }
+        }, 1500);
+        return hs;
+    }
+
+    private View chip(String label, final Runnable tap) {
+        TextView t = Ui.tv(act, label, 12.5f, Ui.TEXT);
+        t.setSingleLine(true);
+        t.setPadding(Ui.dp(act, 11), Ui.dp(act, 6), Ui.dp(act, 11), Ui.dp(act, 6));
+        t.setBackground(Ui.bg(Ui.PANEL2, 15, act));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = Ui.dp(act, 6);
+        t.setLayoutParams(lp);
+        t.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { tap.run(); }
+        });
+        return t;
+    }
+
+    private void rebuildChips() {
+        if (modeBar == null) return;
+        modeBar.removeAllViews();
+        modeBar.addView(chip("模式 · " + (curModel.length() == 0 ? "默认" : curModel), new Runnable() {
+            public void run() { pickModel(); }
+        }));
+        modeBar.addView(chip("思考 · " + (curEffort.length() == 0 ? "默认" : curEffort), new Runnable() {
+            public void run() { pickEffort(); }
+        }));
+        modeBar.addView(chip("权限 · " + (curPerm.length() == 0 ? "默认" : curPerm), new Runnable() {
+            public void run() { pickPerm(); }
+        }));
+    }
+
+    /** 通用暗色选择弹窗：labels 显示、values 回传。 */
+    private void showPick(String title, java.util.List<String> labels, final java.util.List<String> values, final Pick cb) {
+        LinearLayout bx = Ui.col(act);
+        bx.setBackground(Ui.bg(Ui.PANEL2, 14, act));
+        int q = Ui.dp(act, 6);
+        bx.setPadding(q, q, q, q);
+        TextView h = Ui.tv(act, title, 12f, Ui.DIM);
+        h.setPadding(Ui.dp(act, 10), Ui.dp(act, 8), Ui.dp(act, 10), Ui.dp(act, 6));
+        bx.addView(h);
+        for (int i = 0; i < labels.size(); i++) {
+            final int idx = i;
+            TextView r = Ui.tv(act, labels.get(i), 14f, Ui.TEXT);
+            r.setSingleLine(false);
+            r.setPadding(Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10));
+            r.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { cb.pick(values.get(idx)); }
+            });
+            bx.addView(r);
+        }
+        final android.widget.PopupWindow pw = new android.widget.PopupWindow(bx,
+                Ui.dp(act, 250), LinearLayout.LayoutParams.WRAP_CONTENT, true);
+        pw.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+        pw.setOutsideTouchable(true);
+        pw.showAtLocation(modeBar, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, Ui.dp(act, 130));
+    }
+
+    /** 把原始响应落到应用私有目录（root 可读），用来确认真实字段名，别再来回猜。 */
+    private void dumpJson(String name, String text) {
+        try {
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(new java.io.File(act.getFilesDir(), name));
+            fo.write(text.getBytes("UTF-8"));
+            fo.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void pickModel() {
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    if (modelGroups == null) {
+                        JSONObject r = act.requireDsh().request("models.catalog", new JSONObject(), 30000, null);
+                        modelGroups = r.optJSONArray("groups");
+                        JSONObject c = r.optJSONObject("current");
+                        if (c != null) {
+                            curProvider = c.optString("provider", "");
+                            curModel = c.optString("model", "");
+                            curEffort = c.optString("reasoningEffort", "");
+                        }
+                    }
+                    final java.util.List<String> labels = new java.util.ArrayList<String>();
+                    final java.util.List<String> values = new java.util.ArrayList<String>();
+                    final String[] PK = {"provider", "vendor", "name", "id", "label", "slug"};
+                    final String[] MK = {"model", "name", "id", "label", "title", "slug", "value"};
+                    final String[] GK = {"models", "items", "list", "entries", "model"};
+                    for (int g = 0; modelGroups != null && g < modelGroups.length(); g++) {
+                        JSONObject grp = modelGroups.optJSONObject(g);
+                        if (grp == null) continue;
+                        String prov = grp.optString("id", "");          // provider 必须用 id
+                        String provName = grp.optString("name", prov);
+                        if (prov.length() == 0) {
+                            for (int k = 0; k < PK.length && prov.length() == 0; k++) prov = grp.optString(PK[k], "");
+                            provName = prov;
+                        }
+                        JSONArray ms = null;
+                        for (int k = 0; k < GK.length && ms == null; k++) ms = grp.optJSONArray(GK[k]);
+                        for (int m = 0; ms != null && m < ms.length(); m++) {
+                            JSONObject mo = ms.optJSONObject(m);
+                            String mid = "";
+                            String show = "";
+                            if (mo != null) {
+                                mid = mo.optString("id", "");           // 要发出去的是 id
+                                show = mo.optString("name", mid);       // 屏幕上显示 name
+                                if (mid.length() == 0) {
+                                    for (int k = 0; k < MK.length && mid.length() == 0; k++) mid = mo.optString(MK[k], "");
+                                    show = mid;
+                                }
+                            } else {
+                                mid = ms.optString(m, "");              // 条目可能直接是字符串
+                                show = mid;
+                            }
+                            if (mid.length() == 0) continue;
+                            boolean isDef = mo != null && mo.optBoolean("default", false);
+                            labels.add("[" + provName + "] " + show + (isDef ? "  ★默认" : ""));
+                            values.add(prov + "\n" + mid + "\n" + show);
+                        }
+                    }
+                    if (labels.isEmpty()) {
+                        setStatus("模型目录为空", Ui.AMBER);
+                        cv.note("模型目录为空 · 诊断：" + (modeErr.length() == 0 ? "groups 里没有模型" : modeErr), Ui.AMBER);
+                        return;
+                    }
+                    act.ui(new Runnable() {
+                        public void run() {
+                            showPick("选择模型（模式）", labels, values, new Pick() {
+                                public void pick(String v) {
+                                    String[] sp = v.split("\n", -1);
+                                    applyModel(sp[0], sp.length > 1 ? sp[1] : "", curEffort,
+                                            sp.length > 2 ? sp[2] : "");
+                                }
+                            });
+                        }
+                    });
+                } catch (Exception e) {
+                    setStatus("模型目录拉取失败：" + e.getMessage(), Ui.RED);
+                }
+            }
+        });
+    }
+
+    private JSONArray efforts;
+    private String curModelName = "";
+
+    /** 流式帧指纹落盘（诊断 host 到底发没发 reasoning 增量）。 */
+    /** 帧级调试日志：默认关掉，排查流式问题时置 true（写 files/frames.log，256KB 封顶）。 */
+    private static final boolean DEBUG_FRAMES = false;
+
+    private void logFrame(String kind, String text) {
+        if (!DEBUG_FRAMES) return;
+        try {
+            java.io.File f = new java.io.File(act.getFilesDir(), "frames.log");
+            if (f.length() > 262144) {
+                return;
+            }
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(f, true);
+            fo.write((kind + " | len=" + text.length() + " | "
+                    + text.substring(0, Math.min(60, text.length())).replace('\n', ' ')
+                    + "\n").getBytes("UTF-8"));
+            fo.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 思考强度：档位来自当前模型自己的 reasoning.efforts（off/low/high/max）。 */
+    private void pickEffort() {
+        java.util.List<String> labels = new java.util.ArrayList<String>();
+        final java.util.List<String> values = new java.util.ArrayList<String>();
+        for (int i = 0; efforts != null && i < efforts.length(); i++) {
+            JSONObject e = efforts.optJSONObject(i);
+            if (e == null) continue;
+            String id = e.optString("id", "");
+            if (id.length() == 0) continue;
+            String nm = e.optString("name", id);
+            String d = e.optString("description", "");
+            labels.add(id + "  " + nm + (d.length() == 0 ? "" : "\n" + d)
+                    + (id.equals(curEffort) ? "  ●当前" : ""));
+            values.add(id);
+        }
+        if (labels.isEmpty()) {              // 兜底：真目录里就是这四档
+            labels.add("off  不想"); values.add("off");
+            labels.add("low  省电，快"); values.add("low");
+            labels.add("high  想久一点"); values.add("high");
+            labels.add("max  拉到顶"); values.add("max");
+        }
+        showPick(curModel.length() == 0 ? "思考强度（当前模型未知）" : "思考强度", labels, values, new Pick() {
+            public void pick(String v) { applyModel(curProvider, curModel, v, curModelName); }
+        });
+    }
+
+    /** 从目录里取出某模型支持的思考强度档位与其展示名。 */
+    private void setEffortsFor(String providerId, String modelId) {
+        efforts = null;
+        for (int g = 0; modelGroups != null && g < modelGroups.length(); g++) {
+            JSONObject grp = modelGroups.optJSONObject(g);
+            if (grp == null || !providerId.equals(grp.optString("id", ""))) continue;
+            JSONArray ms = grp.optJSONArray("models");
+            for (int m = 0; ms != null && m < ms.length(); m++) {
+                JSONObject mo = ms.optJSONObject(m);
+                if (mo == null || !modelId.equals(mo.optString("id", ""))) continue;
+                curModelName = mo.optString("name", modelId);
+                JSONObject rr = mo.optJSONObject("reasoning");
+                if (rr != null) efforts = rr.optJSONArray("efforts");
+                return;
+            }
+        }
+    }
+
+    private void pickPerm() {
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    if (permCatalog == null) {
+                        JSONObject r = act.requireDsh().request("permissions.catalog", new JSONObject(), 30000, null);
+                        permCatalog = r.optJSONArray("catalog");
+                    }
+                    final java.util.List<String> labels = new java.util.ArrayList<String>();
+                    final java.util.List<String> values = new java.util.ArrayList<String>();
+                    for (int i = 0; permCatalog != null && i < permCatalog.length(); i++) {
+                        JSONObject cat = permCatalog.optJSONObject(i);
+                        if (cat == null) continue;
+                        String cn = cat.optString("name", "");
+                        String d0 = cat.optString("description", "");
+                        JSONArray ps = cat.optJSONArray("presets");
+                        if (ps == null) {          // 扁平形状：这一项本身就是预设 {value,name}
+                            String pn = cat.optString("name", cat.optString("value", "?"));
+                            labels.add(pn + (d0.length() == 0 ? "" : "\n" + d0)
+                                    + (cat.optString("value", "").equals(curPerm) ? "  ●当前" : ""));
+                            values.add(presetId(cat));
+                            continue;
+                        }
+                        for (int j = 0; ps != null && j < ps.length(); j++) {
+                            JSONObject po = ps.optJSONObject(j);
+                            if (po == null) continue;
+                            String pn = po.optString("name", "?");
+                            String d = po.optString("description", "");
+                            labels.add((cn.length() == 0 ? "" : cn + " · ") + pn + (d.length() == 0 ? "" : "\n" + d));
+                            values.add(presetId(po));   // 送回去的必须是标识符，不是显示名
+                        }
+                    }
+                    if (labels.isEmpty()) {
+                        // 把失败形状直接摊出来，省得再来回猜
+                        if (permCatalog == null) {
+                            cv.note("权限目录：响应里没有 catalog 字段（形状不同）", Ui.AMBER);
+                        } else {
+                            cv.note("权限目录是空数组 length=0", Ui.AMBER);
+                        }
+                        setStatus("权限目录为空", Ui.AMBER);
+                        return;
+                    }
+                    act.ui(new Runnable() {
+                        public void run() {
+                            showPick("工作区权限", labels, values, new Pick() {
+                                public void pick(String v) { applyPerm(v); }
+                            });
+                        }
+                    });
+                } catch (Exception e) {
+                    setStatus("权限目录拉取失败：" + e.getMessage(), Ui.RED);
+                }
+            }
+        });
+    }
+
+    private void applyModel(final String provider, final String model, final String effort, final String show) {
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", sessionId);
+                    p.put("provider", provider);
+                    p.put("model", model);
+                    if (effort != null && effort.length() > 0) p.put("reasoningEffort", effort);
+                    JSONObject r = act.requireDsh().request("models.select", p, 30000, null);
+                    JSONObject c = r.optJSONObject("default");
+                    if (c == null) c = r.optJSONObject("current");
+                    if (c != null) {
+                        curProvider = c.optString("provider", provider);
+                        curModel = c.optString("model", model);
+                        curEffort = c.optString("reasoningEffort", effort == null ? "" : effort);
+                    } else {
+                        curProvider = provider;
+                        curModel = model;
+                        curEffort = effort == null ? "" : effort;
+                    }
+                    if (show != null && show.length() > 0) curModelName = show;
+                    setEffortsFor(curProvider, curModel);
+                    act.ui(new Runnable() {
+                        public void run() {
+                            rebuildChips();
+                            cv.note("已切换 · " + (curModelName.length() > 0 ? curModelName : curModel)
+                                    + (curEffort.length() == 0 ? "" : " · 思考 " + curEffort), Ui.GREEN);
+                        }
+                    });
+                } catch (Exception e) {
+                    setStatus("切换失败：" + e.getMessage(), Ui.RED);
+                    cv.note("切换失败：" + e.getMessage() + "（送的 provider=" + provider + " model=" + model + "）", Ui.RED);
+                }
+            }
+        });
+    }
+
+    private void applyPerm(final String preset) {
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", sessionId);
+                    p.put("preset", preset);
+                    JSONObject r = act.requireDsh().request("permissions.set", p, 30000, null);
+                    curPerm = r.optString("preset", preset);
+                    act.ui(new Runnable() {
+                        public void run() {
+                            rebuildChips();
+                            cv.note("工作区权限 · " + curPerm, Ui.GREEN);
+                        }
+                    });
+                } catch (Exception e) {
+                    setStatus("权限设置失败：" + e.getMessage(), Ui.RED);
+                    cv.note("权限设置失败：" + e.getMessage() + "（送的 preset=" + preset + "）", Ui.RED);
+                }
+            }
+        });
+    }
+
+    /** 预设的「真·标识」：不同上游字段名不一样，按优先级挑第一个非空字符串。 */
+    private String presetId(JSONObject po) {
+        String[] keys = {"id", "value", "key", "preset", "slug", "name"};
+        for (int i = 0; i < keys.length; i++) {
+            String v = po.optString(keys[i], "");
+            if (v.length() > 0) return v;
+        }
+        return "";
+    }
+
+    /** 模式栏诊断：目录拉不到时把原话摊出来，别再黑屏瞎猜。 */
+    private String modeErr = "";
+
+    /** 会话打开时同步真实状态。当前模型/权限优先取 sessions.list（这条通道最稳）。 */
+    private void refreshMode() {
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject r = act.requireDsh().request("sessions.list", new JSONObject(), 30000, null);
+                    JSONArray arr = r.optJSONArray("sessions");
+                    if (arr == null) arr = r.optJSONArray("items");
+                    for (int i = 0; arr != null && i < arr.length(); i++) {
+                        JSONObject it = arr.optJSONObject(i);
+                        if (it == null) continue;
+                        String id = it.optString("sessionId", it.optString("id", ""));
+                        if (!sessionId.equals(id)) continue;
+                        String m = it.optString("model", "");
+                        if (m.length() > 0) curModel = m;
+                        Object pm = it.opt("permissions");
+                        if (pm != null) curPerm = DshConsole.flattenPermission(pm);
+                        break;
+                    }
+                } catch (Exception e) {
+                    modeErr = "sessions.list: " + e.getMessage();
+                }
+                try {
+                    JSONObject r = act.requireDsh().request("models.catalog", new JSONObject(), 30000, null);
+                    dumpJson("models.catalog.json", r.toString());
+                    modelGroups = r.optJSONArray("groups");
+                    JSONObject c = r.optJSONObject("default");
+                    if (c == null) c = r.optJSONObject("current");
+                    if (c == null) c = r.optJSONObject("selected");
+                    if (c != null) {
+                        String p = c.optString("provider", ""), m = c.optString("model", "");
+                        if (p.length() > 0) curProvider = p;
+                        if (m.length() > 0) curModel = m;
+                        String ef = c.optString("reasoningEffort", "");
+                        if (ef.length() > 0) curEffort = ef;
+                    }
+                    setEffortsFor(curProvider, curModel);
+                    if (modelGroups == null) modeErr = "models.catalog 响应里没有 groups 字段";
+                } catch (Exception e) {
+                    modeErr = "models.catalog: " + e.getMessage();
+                }
+                try {
+                    JSONObject pc = act.requireDsh().request("permissions.catalog", new JSONObject(), 30000, null);
+                    dumpJson("permissions.catalog.json", pc.toString());
+                    permCatalog = pc.optJSONArray("options");      // 真形状：扁平 options[]
+                    if (permCatalog == null) permCatalog = pc.optJSONArray("catalog");
+                    if (permCatalog == null) permCatalog = pc.optJSONArray("presets");
+                    String dp = pc.optString("defaultPreset", "");
+                    if (dp.length() > 0) curPerm = dp;
+                    Object pcur = pc.opt("current");
+                    if (pcur != null) curPerm = DshConsole.flattenPermission(pcur);
+                } catch (Exception e) {
+                    modeErr = "permissions.catalog: " + e.getMessage();
+                }
+                act.ui(new Runnable() {
+                    public void run() { rebuildChips(); }
+                });
+            }
+        });
     }
 
     private void setStatus(String s, int color) {
@@ -414,20 +841,28 @@ public class TabChat extends Tab {
         }
         if ("delta".equals(event)) {
             final String chunk = data.optString("text", "");
-            // 不再等 prompt 的 ack：回执慢/丢会把整段流式吞掉，turnStarted 就够判断
-            if (!turnStarted || chunk.length() == 0) return;
-            if (data.optBoolean("reasoning", false)) {   // host 放行 reasoning-delta 后走这里
+            logFrame(data.optBoolean("reasoning", false) ? "reasoning" : "text", chunk);
+            if (data.optBoolean("reasoning", false)) {   // 思考增量：先于一切门，收到就长出来
+                final boolean firstThink = thinkBuf.length() == 0;
                 thinkBuf.append(chunk);
+                turnStarted = true;                      // 外部发起的回合也据此进入流式态
+                act.ui(new Runnable() {
+                    public void run() {
+                        cv.thinkAppend(chunk);
+                        logFrame("R-render", chunk);
+                        if (firstThink) setStatus("思考中…", Ui.AMBER);
+                    }
+                });
                 return;
             }
+            // 正文增量才需要等回合开始：回执慢/丢会把整段流式吞掉
+            if (!turnStarted || chunk.length() == 0) return;
+            logFrame("T-pass", chunk);
             deltaCount++;
             if (deltaCount == 1) {
                 act.ui(new Runnable() {
                     public void run() {
-                        if (thinkBuf.length() > 0) {     // 思考先落块，正文跟在它下面
-                            cv.thinking(thinkBuf.toString());
-                            thinkBuf.setLength(0);
-                        }
+                        cv.thinkEnd();                   // 正文开口 → 思考收成一行
                         cv.botStart();
                         setStatus("生成中…", Ui.ACCENT);
                     }
@@ -443,7 +878,9 @@ public class TabChat extends Tab {
         if (!"event".equals(event)) return;
         long seq = data.optLong("seq", -1);
         if (base >= 0 && seq >= 0 && seq <= base) return;
-        if (!accepted) return;
+        if (!accepted) {
+            accepted = true;   // 外部（PC 侧 watch/harness）发起的回合也要在这里长出来，别整回合不渲染
+        }
         String kind = data.optString("kind", "");
         if ("turn-start".equals(kind)) {
             turnStarted = true;
@@ -456,10 +893,7 @@ public class TabChat extends Tab {
                 final String reason = data.optString("reason", "");
                 act.ui(new Runnable() {
                     public void run() {
-                        if (thinkBuf.length() > 0) {      // 只思考、没正文的情况也要留下痕迹
-                            cv.thinking(thinkBuf.toString());
-                            thinkBuf.setLength(0);
-                        }
+                        cv.thinkEnd();                    // 只思考、没正文也要把那一行留下
                         cv.botEnd();
                         streamingUi(false);
                         setStatus("回合结束 " + reason, Ui.DIM);
