@@ -1,0 +1,6 @@
+build/
+out/
+*.dex
+*.apk
+*.bak
+__pycache__/

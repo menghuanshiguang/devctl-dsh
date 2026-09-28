@@ -1,0 +1,377 @@
+package com.minis.dshconsole;
+
+import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.os.Build;
+import android.util.TypedValue;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.HorizontalScrollView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+
+/**
+ * 设计令牌 + 控件工厂。
+ * 稳定感的来源全在这儿：3 层表面、1 条发丝线、1 套字级、1 套间距/圆角、统一按压反馈。
+ * 任何地方想写 0xFF…… 之前，先看这里有没有现成的。
+ */
+public class Ui {
+
+    // ─── 表面：三层，对齐 Minis 夜间主题（纯黑底 + 抬升的次级层）───
+    public static final int BG = 0xFF000000;      // 页面底（Minis background）
+    public static final int SURF = 0xFF26262A;    // 卡面 / 次级底（secondaryBg）
+    public static final int SURF2 = 0xFF2C2C30;   // 输入框（inputBg）
+    public static final int SURF3 = 0xFF3A3A3F;   // 工具块 / 按压态（toolBg）
+
+    /** 发丝线：所有分隔都用它，别再用实心灰条。 */
+    public static final int STROKE = 0xFF38383A;  // 表格线 / 卡片边（tableBorder）
+    public static final int STROKE2 = 0x40545458;
+    public static final int PRESS = 0x1FFFFFFF;
+
+    // ─── 文字 ───
+    public static final int TEXT = 0xFFFFFFFF;    // primaryText
+    public static final int DIM = 0x99EBEBF5;     // secondaryText
+    public static final int MUT = 0x4DEBEBF5;     // tertiaryText
+
+    // ─── 语义色：一个用途一个色，不再混用 ───
+    public static final int ACCENT = 0xFF0A84FF;   // 选中 / 链接（Minis link·thinking 蓝）
+    public static final int MINE = 0xFF2F3A5C;     // 我方气泡（Minis 夜间 userBubble，暗蓝石板）
+    public static final int THEIRS = 0x00000000;   // 对方无气泡，直接铺底
+    public static final int GREEN = 0xFF30D158;    // 在线 / 成功
+    public static final int RED = 0xFFFF453A;      // 报错
+    public static final int AMBER = 0xFFFF9F0A;    // 工具调用 / 警告
+    public static final int VIOLET = 0xFFBF5AF2;   // 提示词注入
+
+    /** 代码：行内 chip 与整块代码（Minis inlineCode / codeBlock）。 */
+    public static final int CODE_BG = 0xFF262626, CODE_FG = 0xFF8CF38C;
+    public static final int ICODE_BG = 0xFF34343A, ICODE_FG = 0xFFFF9F0A;
+
+    /** 调色板渐变用的深色底（卡片内嵌块）。 */
+    public static final int TINT_TOOL = 0xFF26262A;
+    public static final int TINT_ERR = 0xFF2A1A1C;
+    public static final int TINT_INJ = 0xFF1E1A2A;
+
+    /** 兼容旧名（其它页还在用）。 */
+    public static final int PANEL = SURF;
+    public static final int PANEL2 = SURF2;
+
+    // ─── 字级：对齐 Minis（正文 16sp / 单元格 14sp / 代码 13sp）───
+    public static final float FS_TITLE = 16f;
+    public static final float FS_BODY = 16f;      // Minis 助手正文
+    public static final float FS_SMALL = 14f;     // Minis 表格单元格 · 指示器
+    public static final float FS_MONO = 13f;      // Minis 代码块（行高 18sp）
+    public static final float FS_TINY = 11.5f;
+
+    /** 标题六档：抄 Minis markdown/MarkdownText.kt 的 HeadingBlock。 */
+    public static final float H1 = 24f, H2 = 20f, H3 = 18f, H4 = 16f, H5 = 15f, H6 = 14f;
+
+    // ─── 间距（dp）与圆角（dp）───
+    public static final int S1 = 4, S2 = 8, S3 = 12, S4 = 16, S5 = 20;
+    public static final int R_CARD = 14, R_BUBBLE = 18, R_CHIP = 10, R_PILL = 22;
+    /** 行长规范：正文左右各 16，卡片内边距 12，行触区 44。 */
+    public static final int PAD_H = 16, PAD_CARD = 12, TOUCH_H = 44;
+
+    // ═══════════ 基础 ═══════════
+
+    public static int dp(Context c, float v) {
+        return (int) (v * c.getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    public static GradientDrawable bg(int color, int radiusDp, Context c) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(c, radiusDp));
+        return g;
+    }
+
+    public static GradientDrawable bg(int color, int radiusDp, Context c, int strokeColor, int strokeDp) {
+        GradientDrawable g = bg(color, radiusDp, c);
+        g.setStroke(dp(c, strokeDp), strokeColor);
+        return g;
+    }
+
+    /** 标准表面：底色 + 发丝描边。全局观感一致靠它。 */
+    public static GradientDrawable surf(int fill, int radiusDp, Context c) {
+        return bg(fill, radiusDp, c, STROKE, 1);
+    }
+
+    /** 会话气泡：一角收小做出"尾巴"，其余同半径。 */
+    public static GradientDrawable bubble(int fill, Context c, boolean mine) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(fill);
+        float r = dp(c, R_BUBBLE), s = dp(c, 4);
+        float[] tl, tr, br, bl;
+        if (mine) {
+            tl = new float[]{r, r}; tr = new float[]{r, r};
+            br = new float[]{s, s}; bl = new float[]{r, r};
+        } else {
+            tl = new float[]{r, r}; tr = new float[]{r, r};
+            br = new float[]{r, r}; bl = new float[]{s, s};
+        }
+        g.setCornerRadii(new float[]{tl[0], tl[1], tr[0], tr[1], br[0], br[1], bl[0], bl[1]});
+        return g;
+    }
+
+    /** 统一按压反馈：水波纹叠在底上，API21 以下退化为原底。 */
+    public static void press(View v, Context c, int fill, int radiusDp) {
+        GradientDrawable base = surf(fill, radiusDp, c);
+        if (Build.VERSION.SDK_INT >= 21) {
+            v.setBackground(new RippleDrawable(ColorStateList.valueOf(PRESS), base, null));
+        } else {
+            v.setBackground(base);
+        }
+        v.setClickable(true);
+    }
+
+    /** 发丝分隔线（1px，横向）。 */
+    public static View hairline(Context c) {
+        View v = new View(c);
+        v.setBackgroundColor(STROKE);
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(c, 1))));
+        return v;
+    }
+
+    // ═══════════ 文字 ═══════════
+
+    public static TextView tv(Context c, String text, float sizeSp, int color) {
+        TextView v = new TextView(c);
+        v.setText(text);
+        v.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
+        v.setTextColor(color);
+        return v;
+    }
+
+    public static TextView mono(Context c, String text, float sizeSp, int color) {
+        TextView v = tv(c, text, sizeSp, color);
+        v.setTypeface(android.graphics.Typeface.MONOSPACE);
+        return v;
+    }
+
+    public static TextView title(Context c, String text) {
+        TextView v = tv(c, text, FS_TITLE, TEXT);
+        v.setPadding(0, dp(c, 10), 0, dp(c, 6));
+        return v;
+    }
+
+    public static TextView dim(Context c, String text) {
+        TextView v = tv(c, text, FS_SMALL, DIM);
+        v.setPadding(0, dp(c, 2), 0, dp(c, 4));
+        return v;
+    }
+
+    /** 段落小标题：10.5sp + 字距，用来做"回合 12"这种分隔标签。 */
+    public static TextView label(Context c, String text) {
+        TextView v = tv(c, text, FS_TINY, MUT);
+        if (Build.VERSION.SDK_INT >= 21) v.setLetterSpacing(0.06f);
+        return v;
+    }
+
+    /** 状态胶囊。 */
+    public static TextView chip(Context c, String text, int color) {
+        TextView v = tv(c, text, FS_TINY, color);
+        v.setPadding(dp(c, 8), dp(c, 3), dp(c, 8), dp(c, 3));
+        v.setBackground(bg(color & 0x00FFFFFF | 0x22000000, R_CHIP, c));
+        return v;
+    }
+
+    /** 发丝线夹着的居中标签，做回合边界。 */
+    public static LinearLayout sep(Context c, String text) {
+        LinearLayout r = row(c);
+        r.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        int m = dp(c, S2);
+        r.setPadding(0, dp(c, S2), 0, dp(c, S2));
+        r.addView(line(c));
+        TextView t = label(c, text);
+        t.setPadding(m, 0, m, 0);
+        r.addView(t);
+        r.addView(line(c));
+        return r;
+    }
+
+    private static View line(Context c) {
+        View v = new View(c);
+        v.setBackgroundColor(STROKE);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, Math.max(1, dp(c, 1)), 1f);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    // ═══════════ 控件 ═══════════
+
+    public static EditText input(Context c, String hint) {
+        EditText e = new EditText(c);
+        e.setHint(hint);
+        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, FS_BODY);
+        e.setTextColor(TEXT);
+        e.setHintTextColor(MUT);
+        e.setBackground(surf(SURF2, R_CARD, c));
+        e.setPadding(dp(c, PAD_CARD), dp(c, 10), dp(c, PAD_CARD), dp(c, 10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(c, S2);
+        e.setLayoutParams(lp);
+        return e;
+    }
+
+    public static Button btn(Context c, String text) {
+        Button b = new Button(c);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, FS_SMALL);
+        b.setTextColor(TEXT);
+        b.setBackground(surf(SURF2, R_CHIP, c));
+        b.setPadding(dp(c, S3), dp(c, S2), dp(c, S3), dp(c, S2));
+        b.setMinHeight(dp(c, 36));
+        b.setStateListAnimator(null);
+        v21(b);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dp(c, S2);
+        lp.bottomMargin = dp(c, S2);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    /** 主按钮：实心强调色 + 深色字。 */
+    public static Button primary(Context c, String text, View.OnClickListener l) {
+        Button b = new Button(c);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, FS_SMALL);
+        b.setTextColor(0xFF0B1220);
+        b.setBackground(bg(ACCENT, R_CHIP, c));
+        b.setPadding(dp(c, S3), dp(c, S2), dp(c, S3), dp(c, S2));
+        b.setMinHeight(dp(c, 36));
+        b.setStateListAnimator(null);
+        v21(b);
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    /** API21+ 去掉按钮默认的浮起阴影（阴影忽大忽小很破坏稳定感）。 */
+    private static void v21(View v) {
+        if (Build.VERSION.SDK_INT >= 21) {
+            try {
+                v.setElevation(0f);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    public static Button tabBtn(Context c, String text) {
+        Button b = btn(c, text);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, FS_SMALL);
+        b.setPadding(dp(c, 2), dp(c, 6), dp(c, 2), dp(c, 6));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp.leftMargin = dp(c, 2);
+        lp.rightMargin = dp(c, 2);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    public static LinearLayout col(Context c) {
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.VERTICAL);
+        return l;
+    }
+
+    public static LinearLayout row(Context c) {
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        return l;
+    }
+
+    public static HorizontalScrollView hscroll(Context c, View child) {
+        HorizontalScrollView h = new HorizontalScrollView(c);
+        h.setHorizontalScrollBarEnabled(false);
+        h.addView(child);
+        return h;
+    }
+
+    public static LinearLayout card(Context c) {
+        LinearLayout l = col(c);
+        l.setBackground(surf(SURF, R_CARD, c));
+        int p = dp(c, PAD_CARD);
+        l.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(c, S2);
+        l.setLayoutParams(lp);
+        return l;
+    }
+
+    public static View gap(Context c, int h) {
+        View v = new View(c);
+        v.setLayoutParams(new LinearLayout.LayoutParams(1, dp(c, h)));
+        return v;
+    }
+
+    public static View dividerV(Context c) {
+        View v = new View(c);
+        v.setBackgroundColor(STROKE);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                Math.max(1, dp(c, 1)), LinearLayout.LayoutParams.MATCH_PARENT);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    public static ScrollView scroller(Context c, View child) {
+        ScrollView s = new ScrollView(c);
+        s.setClipToPadding(false);
+        s.addView(child, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+        return s;
+    }
+
+    public static TextView plain(Context c, String text) {
+        TextView v = tv(c, text, 12.5f, TEXT);
+        v.setLineSpacing(dp(c, 2), 1f);
+        v.setTextIsSelectable(true);
+        return v;
+    }
+
+    // ---- 便捷重载 ----
+
+    public static TextView tv(Context c, String text, int sizeSp, int color, boolean mono) {
+        TextView v = tv(c, text, (float) sizeSp, color);
+        if (mono) v.setTypeface(android.graphics.Typeface.MONOSPACE);
+        return v;
+    }
+
+    public static Button btn(Context c, String text, View.OnClickListener l) {
+        Button b = btn(c, text);
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    public static LinearLayout section(Context c, String title, String sub) {
+        LinearLayout box = col(c);
+        TextView t = tv(c, "▎" + title, FS_SMALL, ACCENT);
+        t.setPadding(0, dp(c, 10), 0, dp(c, 2));
+        box.addView(t);
+        if (sub != null && sub.length() > 0) {
+            box.addView(tv(c, sub, FS_TINY, DIM));
+        }
+        return box;
+    }
+
+    public static LinearLayout sectionBtn(Context c, String title, View.OnClickListener l) {
+        LinearLayout box = section(c, title, null);
+        TextView t = (TextView) box.getChildAt(0);
+        t.setText("▎" + title + "   ↻");
+        t.setOnClickListener(l);
+        return box;
+    }
+
+    public static LinearLayout box(Context c, View child) {
+        LinearLayout b = card(c);
+        b.addView(child);
+        return b;
+    }
+}
