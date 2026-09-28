@@ -35,7 +35,7 @@ netstat -ano | findstr :7788
 首次启动生成 token 并写入 `%USERPROFILE%\.dsh\devctl-dsh.json`：
 
 ```json
-{ "token": "7fb9b946…", "host": "0.0.0.0", "port": 7788, "version": "1.0.1", "startedAt": 1790610287877 }
+{ "token": "7fb9b946…", "host": "0.0.0.0", "port": 7788, "version": "1.1.0", "startedAt": 1790610287877 }
 ```
 
 改端口 / 绑定地址：编辑本包 `cordis.patch.yml` 的 `config`，或在 profile 补丁层覆盖同一 `id`。
@@ -68,9 +68,19 @@ dshctl.py use <name>                                       # 设默认设备
 dshctl.py rm <name>                                        # 删除设备
 
 dshctl.py ping                     # 连通性 + 鉴权 + 延迟
+
+dshctl.py workspaces               # 列出工作区（别名 ws）
+dshctl.py ws-new D:\proj\thing     # 把目录注册成工作区
+dshctl.py ws-use d431cc0a          # 选定工作区，之后 new 默认建在这里
+dshctl.py ws-rename d431cc0a "报价系统"
+dshctl.py ws-rm d431cc0a           # 只摘掉注册，目录与会话都留着
+
 dshctl.py sessions [-n 25]         # 列出会话（--roots 只留顶层，-n 0 列全部）
-dshctl.py new [--cwd P] [--preset N]
+dshctl.py new [--workspace W] [--cwd P] [--preset N]
 dshctl.py send "跑一遍测试并修掉失败"     # 发消息，流式打印回复
+dshctl.py send "这张图什么颜色？" --image shot.png   # --image 可重复
+dshctl.py permissions              # 看会话当前权限 + 可用预设（别名 perm）
+dshctl.py permissions workspace-write
 dshctl.py tail [-n 40]             # 最近的消息
 dshctl.py watch [--for 60]         # 实时事件流，Ctrl-C 停止
 dshctl.py cancel                   # 打断正在跑的那一轮
@@ -89,6 +99,7 @@ dshctl send -s 4863366b "继续"
 ```
 
 不给 `-s` 时用上次用过的会话，没有记忆则取最近活跃的那个。
+`ws-use` 选中的工作区同理记在控制端本地，`new` 不带 `--workspace` 时就用它；若那个工作区在别处被删掉，`new` 会自动忘掉它并以默认工作区重试一次。
 
 常用组合：
 
@@ -97,7 +108,48 @@ dshctl --json sessions | jq '.result.items[0].sessionId'
 echo "解释这个报错" | dshctl send -
 dshctl send --no-wait "长任务，后台跑着" && dshctl watch
 dshctl send --steer "停，换成方案 B"
+dshctl send "比对这两张设计稿" --image before.png --image after.png
 ```
+
+### 工作区
+
+工作区的增删改查走 Host 的 `workspaceController`。`ws-rm` 与 Web 端一致——**只注销工作区条目**，磁盘上的目录和该工作区下的会话都保留。
+
+```bash
+dshctl ws-new /root/repo            # 幂等：已注册就返回既有的那条
+dshctl ws-rename d431cc0a 报价系统
+dshctl workspaces --json | jq -r '.result.items[].path'
+```
+
+工作区可以用完整 id、id 前缀或不重名的标题来指名，`--json` 里字段是 `workspaceId`。
+
+### 权限
+
+`permissions` 不带参数时只从会话的权限投影里读当前值——**不唤醒冷会话**：
+
+```bash
+dshctl perm                       # current / 可用预设 / 默认预设
+dshctl perm -s 4863366b
+```
+
+带预设名才会真正改写，作用于目标会话：
+
+```bash
+dshctl perm workspace-write       # 沙箱限当前工作区，审批改回 ask
+dshctl perm danger-full-access    # 放开沙箱，审批 never
+```
+
+改的是那个会话的运行时策略，和 Web 端 `/permission` 是同一份状态。远端能改权限意味着**能把自己提权到 `danger-full-access`**，见下面的安全边界。
+
+### 图片
+
+`--image` 直接读本地文件、按扩展名定媒体类型、base64 塞进 prompt，走 DSH 的图片附件通道（`.png` `.jpg` `.jpeg` `.webp` `.gif`）。可以只发图不发字：
+
+```bash
+dshctl send --image screenshot.png      # 不写文本也合法
+```
+
+被控端读的是**控制端本机的文件**——CLI 在手机上，发的是手机里的图。
 
 `--json` 输出恒为 `{"ok":true,"result":…}` 或 `{"ok":false,"error":{"code","message"}}`，退出码 0/1，适合塞进脚本或交给 agent。
 
@@ -109,10 +161,10 @@ JSON Lines over TCP，请求与响应按 `id` 配对，事件不请自来。
 
 ```jsonc
 // 鉴权（必须是第一条；失败即断开）
-{"id":1,"method":"hello","params":{"token":"…","client":"dshctl/1.0.1"}}
+{"id":1,"method":"hello","params":{"token":"…","client":"dshctl/1.1.0"}}
 
 // 请求 → 响应
-{"id":2,"method":"sessions.prompt","params":{"sessionId":"…","mode":"queue","text":"…"}}
+{"id":2,"method":"sessions.prompt","params":{"sessionId":"…","mode":"queue","text":"…","images":[{"mediaType":"image/png","data":"<base64>","name":"shot.png"}]}}
 {"id":2,"ok":true,"result":{"accepted":true}}
 
 // 事件推送
@@ -121,7 +173,9 @@ JSON Lines over TCP，请求与响应按 `id` 配对，事件不请自来。
 {"evt":"delta","data":{"sessionId":"…","text":"正在"}}
 ```
 
-方法：`ping`、`sessions.list|create|prompt|cancel|rename|search|tail|watch|unwatch`、`models.catalog|select`。
+方法：`ping`、`sessions.list|create|prompt|cancel|rename|search|tail|watch|unwatch`、`workspaces.list|create|rename|delete`、`permissions.catalog|current|set`、`models.catalog|select`。
+
+`workspaces.list` 是靠订阅 `workspaceController.follow` 拿首帧 baseline 实现的（Host 只暴露流式接口）；`permissions.set` 与 `permissions.current` 需要会话对象，被控端经 `sessionController.resolveAgent` 取，因此**对冷会话会触发一次 resume**——不带预设的 `permissions` 命令走投影，绕开这一点。
 
 `send` 的实现顺序是**先挂 watch 再 prompt**，两者之间到达的事件一条不丢，`turn/end` 用于判断本轮结束。
 
@@ -146,6 +200,7 @@ profile 补丁层给 `dsh-hmr` 扩了监视根，插件源码目录纳入热重�
 ## 安全边界
 
 - **token 等于整台机器的控制权。** 它能列出、创建、驱动本机上的任意会话，等于让远端以本机身份执行任务。
+- **权限预设也能被远端改写。** `dshctl perm danger-full-access` 会放开目标会话的沙箱、把审批设成 never——控制端不必再向本机要一次同意。
 - **只在内网或 VPN 里跑。** 不要做任何公网端口映射；`0.0.0.0` 监听意味着同网段任何设备都能尝试连接——唯一阻碍就是这个 token。
 - 明文传输，没有 TLS。同网段嗅探可以拿到 token。
 - 换 token：停掉插件、删掉 `%USERPROFILE%\.dsh\devctl-dsh.json`、重新启用插件，然后在控制端重新 `add`。

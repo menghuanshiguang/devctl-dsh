@@ -10,8 +10,11 @@ by a shared token. Every subcommand prints either a terminal view or, with
 
   dshctl add desk --host 192.168.1.10 --port 7788 --token <TOKEN>
   dshctl ping
+  dshctl workspaces
   dshctl sessions
   dshctl send "run the test suite and fix what breaks"
+  dshctl send "what is wrong in this screenshot?" --image shot.png
+  dshctl permissions danger-full-access
   dshctl watch
 
 Security: the token is a bearer credential for the whole DSH instance. Keep the
@@ -19,13 +22,14 @@ port on a trusted LAN or a VPN; never port-forward it to the public internet.
 """
 
 import argparse
+import base64
 import json
 import os
 import socket
 import sys
 import time
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 PROTOCOL = 1
 DEFAULT_PORT = 7788
 DEFAULT_TIMEOUT = 30.0
@@ -35,6 +39,9 @@ CONFIG_PATH = os.environ.get("DSHCTL_HOME") or os.path.join(os.path.expanduser("
 # so clients paired before the rename keep working.
 STATE_NAME = "devctl-dsh.json"
 LEGACY_STATE_NAME = "dsh-remote.json"
+# Prompt images travel inline as base64; the media type comes from the suffix.
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif"}
 
 
 # --------------------------------------------------------------------------- #
@@ -489,8 +496,9 @@ def print_sessions(items):
         sys.stdout.write("%s %-13s %5s  %s%s\n" % (marker, short_id(item.get("sessionId")), human_age(item.get("updatedAt")), tree, title))
         cwd = item.get("cwd")
         model = _flatten_model(item.get("model"))
-        if cwd or model:
-            sys.stdout.write("    %s\n" % dim("  ".join(part for part in (cwd, model) if part)))
+        preset = _flatten_permissions(item.get("permissions"))
+        if cwd or model or preset:
+            sys.stdout.write("    %s\n" % dim("  ".join(part for part in (cwd, model, preset) if part)))
     sys.stdout.flush()
 
 
@@ -684,14 +692,30 @@ def cmd_new(args, config, opts):
         params["agentPreset"] = args.preset
     client = Client(device, opts["timeout"]).connect()
     try:
-        created = client.request("sessions.create", params)
+        if args.workspace:
+            params["workspaceId"] = resolve_workspace(client, config, name, args.workspace)["workspaceId"]
+        elif (config.get("lastWorkspace") or {}).get(name):
+            params["workspaceId"] = (config.get("lastWorkspace") or {})[name]
+        try:
+            created = client.request("sessions.create", params)
+        except RemoteError:
+            if "workspaceId" not in params or args.workspace:
+                raise
+            # The remembered Workspace is gone; fall back to the Host default.
+            (config.get("lastWorkspace") or {}).pop(name, None)
+            save_config(config)
+            params.pop("workspaceId")
+            created = client.request("sessions.create", params)
     finally:
         client.close()
     session_id = created.get("sessionId") if isinstance(created, dict) else None
     remember_session(config, name, session_id)
-    result = {"device": name, "sessionId": session_id, "created": created}
+    result = {"device": name, "sessionId": session_id, "workspaceId": params.get("workspaceId"),
+              "created": created}
     if not opts["json"]:
         sys.stdout.write("%s %s\n" % (green("created"), short_id(session_id)))
+        if params.get("workspaceId"):
+            sys.stdout.write("workspace %s\n" % short_workspace_id(params["workspaceId"]))
         if created.get("agentPreset"):
             sys.stdout.write("preset    %s\n" % created.get("agentPreset"))
         sys.stdout.flush()
@@ -778,6 +802,223 @@ def _print_catalog(catalog):
     if isinstance(failures, list):
         for failure in failures:
             sys.stdout.write("%s %s\n" % (yellow("failure"), json.dumps(failure, ensure_ascii=False)))
+
+
+# --------------------------------------------------------------------------- #
+# workspaces
+# --------------------------------------------------------------------------- #
+
+def fetch_workspaces(client, timeout=None):
+    result = client.request("workspaces.list", None, timeout)
+    return (result or {}).get("items") or []
+
+
+def _compact_workspace(workspace_id):
+    value = (workspace_id or "").lower()
+    for prefix in ("wks-", "workspace-"):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+            break
+    return value.replace("-", "")
+
+
+def short_workspace_id(workspace_id):
+    value = workspace_id or ""
+    if len(value) <= 17:
+        return value
+    return "%s\u2026%s" % (value[:8], value[-4:])
+
+
+def resolve_workspace(client, config, device_name, reference):
+    """Pick a Workspace by full id, id prefix, exact title, or the remembered one."""
+    workspaces = fetch_workspaces(client)
+    if not workspaces:
+        raise CliError("this Host has no Workspace yet (create one: dshctl ws-new <PATH>)")
+    if reference:
+        wanted = reference.strip()
+        for workspace in workspaces:
+            if workspace.get("workspaceId") == wanted:
+                return workspace
+        exact = [w for w in workspaces if (w.get("title") or "").lower() == wanted.lower()]
+        if len(exact) == 1:
+            return exact[0]
+        compact = _compact_workspace(wanted)
+        matches = [w for w in workspaces
+                   if compact and compact in _compact_workspace(w.get("workspaceId"))]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise CliError("no Workspace matches %r (try: dshctl workspaces)" % reference)
+        raise CliError("%r matches %d Workspaces - be more specific" % (reference, len(matches)))
+    remembered = (config.get("lastWorkspace") or {}).get(device_name)
+    if remembered:
+        for workspace in workspaces:
+            if workspace.get("workspaceId") == remembered:
+                return workspace
+    return workspaces[0]
+
+
+def print_workspaces(items):
+    if not items:
+        sys.stdout.write("no Workspace\n")
+        return
+    sys.stdout.write(dim("  %-17s %4s  %s\n" % ("WORKSPACE", "SESS", "TITLE")))
+    for item in items:
+        sessions = item.get("sessionIds") or []
+        title = (item.get("title") or "(untitled)").replace("\n", " ").strip()
+        sys.stdout.write("  %-17s %4d  %s\n" % (short_workspace_id(item.get("workspaceId")), len(sessions), title))
+        if item.get("path"):
+            sys.stdout.write("    %s\n" % dim(item.get("path")))
+    sys.stdout.flush()
+
+
+def cmd_workspaces(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        items = fetch_workspaces(client)
+    finally:
+        client.close()
+    if not opts["json"]:
+        print_workspaces(items)
+    return {"device": name, "items": items, "total": len(items)}
+
+
+def cmd_ws_new(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        created = client.request("workspaces.create", {"path": args.path}) or {}
+    finally:
+        client.close()
+    workspace = created.get("workspace") or {}
+    result = {"device": name, "created": created.get("created"), "workspace": workspace}
+    if not opts["json"]:
+        label = "created" if created.get("created") else "existing"
+        sys.stdout.write("%s %s\n" % (green(label), short_workspace_id(workspace.get("workspaceId"))))
+        if workspace.get("title"):
+            sys.stdout.write("title     %s\n" % workspace.get("title"))
+        if workspace.get("path"):
+            sys.stdout.write("path      %s\n" % workspace.get("path"))
+        sys.stdout.flush()
+    return result
+
+
+def cmd_ws_use(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        workspace = resolve_workspace(client, config, name, args.workspace)
+    finally:
+        client.close()
+    workspace_id = workspace.get("workspaceId")
+    config.setdefault("lastWorkspace", {})[name] = workspace_id
+    save_config(config)
+    result = {"device": name, "workspace": workspace, "remembered": True}
+    if not opts["json"]:
+        sys.stdout.write("%s %s  %s\n" % (green("selected"), short_workspace_id(workspace_id),
+                                          workspace.get("title") or ""))
+        sys.stdout.write(dim("`dshctl new` now creates Sessions in this Workspace\n"))
+        sys.stdout.flush()
+    return result
+
+
+def cmd_ws_rename(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        workspace = resolve_workspace(client, config, name, args.workspace)
+        updated = client.request("workspaces.rename",
+                                 {"workspaceId": workspace.get("workspaceId"), "title": args.title}) or {}
+    finally:
+        client.close()
+    view = updated.get("workspace") or {}
+    result = {"device": name, "workspace": view}
+    if not opts["json"]:
+        sys.stdout.write("%s %s  %s\n" % (green("renamed"), short_workspace_id(view.get("workspaceId")),
+                                          view.get("title") or ""))
+        sys.stdout.flush()
+    return result
+
+
+def cmd_ws_rm(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        workspace = resolve_workspace(client, config, name, args.workspace)
+        client.request("workspaces.delete", {"workspaceId": workspace.get("workspaceId")})
+    finally:
+        client.close()
+    workspace_id = workspace.get("workspaceId")
+    remembered = config.get("lastWorkspace") or {}
+    if remembered.get(name) == workspace_id:
+        remembered.pop(name, None)
+        save_config(config)
+    result = {"device": name, "deleted": workspace_id}
+    if not opts["json"]:
+        sys.stdout.write("%s %s  %s\n" % (green("removed"), short_workspace_id(workspace_id),
+                                          workspace.get("title") or ""))
+        sys.stdout.write(dim("its Sessions and files are kept; only the Workspace entry is gone\n"))
+        sys.stdout.flush()
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# permissions
+# --------------------------------------------------------------------------- #
+
+def _flatten_permissions(value):
+    """Tolerate either a preset name or a raw {currentValue} projection."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        current = value.get("currentValue")
+        if isinstance(current, str):
+            return current
+    return None
+
+
+def cmd_permissions(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        catalog = client.request("permissions.catalog") or {}
+        payload = {"device": name, "catalog": catalog, "sessionId": None, "preset": None}
+        try:
+            session = resolve_session(client, config, name, args.session)
+        except CliError:
+            session = None
+        if session is not None:
+            payload["sessionId"] = session.get("sessionId")
+            if args.preset:
+                applied = client.request("permissions.set",
+                                         {"sessionId": session.get("sessionId"), "preset": args.preset}) or {}
+                payload["preset"] = applied.get("preset")
+            else:
+                # Reading the projection avoids resuming a cold Session just to look.
+                payload["preset"] = _flatten_permissions(session.get("permissions"))
+    finally:
+        client.close()
+
+    if not opts["json"]:
+        preset = payload.get("preset")
+        if preset:
+            sys.stdout.write("current   %s on %s\n" % (bold(preset), short_id(payload["sessionId"])))
+        else:
+            sys.stdout.write("current   %s\n" % dim("(no Session resolved; pass -s)" if not payload["sessionId"]
+                                                    else "(unknown)"))
+        options = catalog.get("options") or []
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            value = option.get("value")
+            marker = "*" if value == preset else " "
+            description = option.get("description") or option.get("name") or ""
+            sys.stdout.write("%s %-22s %s\n" % (marker, value, dim(description) if description else ""))
+        if catalog.get("defaultPreset"):
+            sys.stdout.write(dim("default   %s\n" % catalog.get("defaultPreset")))
+        sys.stdout.flush()
+    return payload
 
 
 def cmd_search(args, config, opts):
@@ -898,12 +1139,31 @@ def cmd_watch(args, config, opts):
     return {"device": name, "sessionId": session["sessionId"], "events": collected}
 
 
+def _read_image(path):
+    """Read one local image into the base64 part the Host takes inline."""
+    extension = os.path.splitext(path)[1].lower()
+    media_type = IMAGE_TYPES.get(extension)
+    if media_type is None:
+        raise CliError("unsupported image type %r (use %s)"
+                       % (extension or path, ", ".join(sorted(IMAGE_TYPES))))
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except IOError as exc:
+        raise CliError("cannot read %s: %s" % (path, exc))
+    if not data:
+        raise CliError("%s is empty" % path)
+    return {"mediaType": media_type, "data": base64.b64encode(data).decode("ascii"),
+            "name": os.path.basename(path)}
+
+
 def cmd_send(args, config, opts):
     parts = list(args.text)
     if parts == ["-"]:
         parts = [sys.stdin.read()]
     text = " ".join(parts).strip()
-    if not text:
+    images = [_read_image(path) for path in (args.image or [])]
+    if not text and not images:
         raise CliError("nothing to send")
 
     name, device = resolve_device(config, opts["device"])
@@ -976,7 +1236,10 @@ def cmd_send(args, config, opts):
 
         # Attach first, then prompt: nothing between the two can be missed.
         client.begin("sessions.watch", {"sessionId": session_id})
-        prompt_id = client.begin("sessions.prompt", {"sessionId": session_id, "mode": "steer" if args.steer else "queue", "text": text})
+        prompt = {"sessionId": session_id, "mode": "steer" if args.steer else "queue", "text": text}
+        if images:
+            prompt["images"] = images
+        prompt_id = client.begin("sessions.prompt", prompt)
         state["prompt_id"] = prompt_id
 
         # `--no-wait` still has to read the acknowledgement: returning before the
@@ -1023,8 +1286,8 @@ def cmd_send(args, config, opts):
         client.close()
 
     text_out = "".join(streamed).strip()
-    result = {"device": name, "sessionId": session_id, "sent": text, "accepted": state["accepted"],
-              "events": collected, "text": text_out}
+    result = {"device": name, "sessionId": session_id, "sent": text, "images": len(images),
+              "accepted": state["accepted"], "events": collected, "text": text_out}
     if not opts["json"]:
         if text_out:
             sys.stdout.write("\n")
@@ -1111,13 +1374,16 @@ def build_parser():
 
     new = sub.add_parser("new", help="create a Session")
     new.add_argument("--cwd", help="working directory on the remote device")
+    new.add_argument("--workspace", help="Workspace id, id prefix, or exact title")
     new.add_argument("--preset", help="agent preset name")
     new.set_defaults(func=cmd_new)
 
     send = sub.add_parser("send", help="prompt a Session and stream the reply")
-    send.add_argument("text", nargs="+", help="prompt text; use `-` to read stdin")
+    send.add_argument("text", nargs="*", help="prompt text; use `-` to read stdin")
     send.add_argument("-s", "--session", help="Session id or unambiguous prefix")
     send.add_argument("--steer", action="store_true", help="steer the running turn instead of queueing")
+    send.add_argument("--image", action="append", metavar="PATH",
+                      help="attach an image (png/jpeg/webp/gif); repeatable")
     send.add_argument("--no-wait", dest="wait", action="store_const", const=0.0, help="return as soon as it is queued")
     send.add_argument("--wait", type=float, help="seconds to wait for the turn to finish (default 600)")
     send.add_argument("--detail", action="store_true", help="also print prompts, injections, and turn boundaries")
@@ -1146,6 +1412,32 @@ def build_parser():
     search = sub.add_parser("search", help="search Session transcripts")
     search.add_argument("query")
     search.set_defaults(func=cmd_search)
+
+    workspaces = sub.add_parser("workspaces", help="list Workspaces", aliases=["ws"])
+    workspaces.set_defaults(func=cmd_workspaces)
+
+    ws_new = sub.add_parser("ws-new", help="create a Workspace for a path")
+    ws_new.add_argument("path", help="directory path on the remote device")
+    ws_new.set_defaults(func=cmd_ws_new)
+
+    ws_use = sub.add_parser("ws-use", help="select the Workspace new Sessions go into")
+    ws_use.add_argument("workspace", help="Workspace id, id prefix, or exact title")
+    ws_use.set_defaults(func=cmd_ws_use)
+
+    ws_rename = sub.add_parser("ws-rename", help="retitle a Workspace")
+    ws_rename.add_argument("workspace", help="Workspace id, id prefix, or exact title")
+    ws_rename.add_argument("title")
+    ws_rename.set_defaults(func=cmd_ws_rename)
+
+    ws_rm = sub.add_parser("ws-rm", help="forget a Workspace (its Sessions and files stay)")
+    ws_rm.add_argument("workspace", help="Workspace id, id prefix, or exact title")
+    ws_rm.set_defaults(func=cmd_ws_rm)
+
+    permissions = sub.add_parser("permissions", help="show or set the Session permission preset",
+                                 aliases=["perm"])
+    permissions.add_argument("preset", nargs="?", help="preset to apply, e.g. danger-full-access")
+    permissions.add_argument("-s", "--session", help="Session id or unambiguous prefix")
+    permissions.set_defaults(func=cmd_permissions)
 
     models = sub.add_parser("models", help="show or change the model")
     models.add_argument("--select", help="PROVIDER/MODEL to apply")

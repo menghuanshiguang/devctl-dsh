@@ -2,9 +2,11 @@
  * Host half of `devctl-dsh`.
  *
  * Opens one token-authenticated JSON-Lines TCP port so another device can drive
- * this DSH from its own CLI: list, create, prompt, watch, and cancel Sessions.
- * Every capability is delegated to the live `ctx.sessionController` Host service;
- * this plugin owns transport, authentication, and wire shaping only.
+ * this DSH from its own CLI: Workspaces, Sessions, prompts (text and images),
+ * model and permission selection, live output, and cancellation. Every capability
+ * is delegated to the live Host services (`sessionController`,
+ * `workspaceController`, `permissionPresets`); this plugin owns transport,
+ * authentication, and wire shaping only.
  */
 import { createServer } from 'node:net'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
@@ -12,8 +14,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 
-const VERSION = '1.0.1'
+const VERSION = '1.1.0'
 const PROTOCOL = 1
+/** Prompt image parts accept exactly these media types. */
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 /** Where the control token is persisted, relative to `$DSH_HOME`. */
 const STATE_NAME = 'devctl-dsh.json'
 /** Pre-rename state file, read once so already-paired clients keep working. */
@@ -53,6 +57,8 @@ function errorText(error) {
   return String(error)
 }
 
+// Only the Session controller is a hard dependency; Workspaces and permission
+// presets are read through `ctx.get` so the port still comes up without them.
 export const inject = ['sessionController']
 
 export function apply(ctx, config) {
@@ -277,21 +283,35 @@ async function dispatch(bridge, connection, method, params) {
     }
 
     case 'sessions.create':
-      return controller.create({
-        ...(typeof params.cwd === 'string' && params.cwd.length > 0 ? { cwd: params.cwd } : {}),
-        ...(typeof params.agentPreset === 'string' && params.agentPreset.length > 0 ? { agentPreset: params.agentPreset } : {}),
-      })
+      return controller.create(
+        {
+          ...(typeof params.workspaceId === 'string' && params.workspaceId.length > 0
+            ? { workspaceId: params.workspaceId }
+            : {}),
+          ...(typeof params.cwd === 'string' && params.cwd.length > 0 ? { cwd: params.cwd } : {}),
+          ...(typeof params.agentPreset === 'string' && params.agentPreset.length > 0
+            ? { agentPreset: params.agentPreset }
+            : {}),
+        },
+        timeoutSignal(CALL_TIMEOUT_MS),
+      )
 
     case 'sessions.prompt': {
       const text = typeof params.text === 'string' ? params.text : ''
-      if (text.trim().length === 0) throw new BridgeError('bad-request', 'text is required')
+      const images = parseImages(params.images)
+      if (text.trim().length === 0 && images.length === 0) {
+        throw new BridgeError('bad-request', 'text or at least one image is required')
+      }
       requireSessionId(params)
+      const content = []
+      if (text.length > 0) content.push({ type: 'text', text })
+      for (const image of images) content.push(image)
       return controller.prompt(
         {
           requestId: randomUUID(),
           sessionId: params.sessionId,
           mode: params.mode === 'steer' ? 'steer' : 'queue',
-          content: [{ type: 'text', text }],
+          content,
         },
         timeoutSignal(CALL_TIMEOUT_MS),
       )
@@ -331,6 +351,62 @@ async function dispatch(bridge, connection, method, params) {
       stopWatch(connection, params.sessionId)
       return { stopped: true }
 
+    case 'workspaces.list': {
+      const value = await readWorkspaces(requireService(bridge, 'workspaceController'))
+      return {
+        items: (value?.items ?? []).map(publicWorkspace),
+        archivedSessionIds: value?.archivedSessionIds ?? [],
+        pinnedSessionIds: value?.pinnedSessionIds ?? [],
+      }
+    }
+
+    case 'workspaces.create': {
+      const path = typeof params.path === 'string' ? params.path.trim() : ''
+      if (path.length === 0) throw new BridgeError('bad-request', 'path is required')
+      return requireService(bridge, 'workspaceController').create({ path }, timeoutSignal(CALL_TIMEOUT_MS))
+    }
+
+    case 'workspaces.rename': {
+      requireWorkspaceId(params)
+      const title = typeof params.title === 'string' ? params.title.trim() : ''
+      if (title.length === 0) throw new BridgeError('bad-request', 'title is required')
+      return requireService(bridge, 'workspaceController').rename(
+        { workspaceId: params.workspaceId, title },
+        timeoutSignal(CALL_TIMEOUT_MS),
+      )
+    }
+
+    case 'workspaces.delete':
+      requireWorkspaceId(params)
+      return requireService(bridge, 'workspaceController').delete(
+        { workspaceId: params.workspaceId },
+        timeoutSignal(CALL_TIMEOUT_MS),
+      )
+
+    case 'permissions.catalog':
+      return requireService(bridge, 'permissionPresets').catalog()
+
+    case 'permissions.current': {
+      requireSessionId(params)
+      const presets = requireService(bridge, 'permissionPresets')
+      const session = await sessionOf(bridge, params.sessionId)
+      return { sessionId: params.sessionId, preset: presets.current(session) }
+    }
+
+    case 'permissions.set': {
+      requireSessionId(params)
+      const preset = typeof params.preset === 'string' ? params.preset.trim() : ''
+      if (preset.length === 0) throw new BridgeError('bad-request', 'preset is required')
+      const presets = requireService(bridge, 'permissionPresets')
+      const session = await sessionOf(bridge, params.sessionId)
+      try {
+        presets.set(session, preset)
+      } catch (error) {
+        throw new BridgeError('bad-request', errorText(error))
+      }
+      return { sessionId: params.sessionId, preset: presets.current(session) }
+    }
+
     case 'models.catalog':
       return controller.modelCatalog()
 
@@ -367,6 +443,38 @@ function requireSessionId(params) {
   }
 }
 
+function requireWorkspaceId(params) {
+  if (typeof params.workspaceId !== 'string' || params.workspaceId.length === 0) {
+    throw new BridgeError('bad-request', 'workspaceId is required')
+  }
+}
+
+/** Prompt image parts carry base64 inline; the CLI sends `{mediaType, data, name?}`. */
+function parseImages(raw) {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) throw new BridgeError('bad-request', 'images must be an array')
+  const images = []
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object') {
+      throw new BridgeError('bad-request', 'each image must be an object')
+    }
+    const mediaType = entry.mediaType
+    if (typeof mediaType !== 'string' || !IMAGE_TYPES.has(mediaType)) {
+      throw new BridgeError('bad-request', `unsupported image mediaType: ${String(mediaType)}`)
+    }
+    if (typeof entry.data !== 'string' || entry.data.length === 0) {
+      throw new BridgeError('bad-request', 'image data is required')
+    }
+    images.push({
+      type: 'image',
+      mediaType,
+      data: entry.data,
+      ...(typeof entry.name === 'string' && entry.name.length > 0 ? { name: entry.name } : {}),
+    })
+  }
+  return images
+}
+
 /** `modelSelection` is a {lastUsed, next} projection; flatten it to "provider/model". */
 function modelSelectionText(projection) {
   if (typeof projection === 'string') return projection
@@ -384,6 +492,9 @@ function publicSummary(summary) {
   const values = summary?.projections?.values ?? {}
   const title = values.title ?? values.sessionTitle
   const model = modelSelectionText(values.modelSelection) ?? values.model
+  // `permissions` is a {currentValue} projection on current Hosts, a bare name on older ones.
+  const permissions =
+    typeof values.permissions === 'string' ? values.permissions : values.permissions?.currentValue
   return {
     sessionId: summary?.sessionId,
     running: summary?.running === true,
@@ -395,7 +506,73 @@ function publicSummary(summary) {
     parentSessionId: summary?.parentSessionId,
     ...(title === undefined ? {} : { title }),
     ...(model === undefined ? {} : { model }),
+    ...(permissions === undefined ? {} : { permissions }),
   }
+}
+
+/** Project a WorkspaceView down to the fields a remote CLI renders. */
+function publicWorkspace(view) {
+  return {
+    workspaceId: view?.workspaceId,
+    path: view?.path,
+    title: view?.title,
+    sessionIds: Array.isArray(view?.sessionIds) ? view.sessionIds : [],
+    createdAt: view?.createdAt,
+    updatedAt: view?.updatedAt,
+  }
+}
+
+/**
+ * The workspace feed is the only way in: its first frame carries the full registry
+ * baseline, so the list is read from that frame and the stream is released at once.
+ */
+async function readWorkspaces(controller) {
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), CALL_TIMEOUT_MS)
+  try {
+    for await (const frame of controller.follow(abort.signal)) {
+      const value = frame?.value ?? {}
+      return { items: value.items ?? [], archivedSessionIds: value.archivedSessionIds, pinnedSessionIds: value.pinnedSessionIds }
+    }
+    return {}
+  } catch (error) {
+    throw new BridgeError('workspace-failed', errorText(error))
+  } finally {
+    clearTimeout(timer)
+    abort.abort()
+  }
+}
+
+/** Reach a Host service that is optional for this plugin, with a sane error if absent. */
+function requireService(bridge, name) {
+  // `ctx.get` reads a service without declaring it in `inject`, so an absent
+  // service costs one command instead of the whole plugin never activating.
+  const service = typeof bridge.ctx?.get === 'function' ? bridge.ctx.get(name) : undefined
+  if (!service) throw new BridgeError('unavailable', `${name} is not composed in this Host`)
+  return service
+}
+
+/**
+ * Session-object APIs (permission presets) need the live Session, not its id.
+ * `resolveAgent` resumes a cold Session, which is the required side effect here.
+ */
+async function sessionOf(bridge, sessionId) {
+  const controller = bridge.ctx.sessionController
+  if (typeof controller.resolveAgent !== 'function') {
+    throw new BridgeError('unavailable', 'sessionController.resolveAgent is unavailable in this Host')
+  }
+  let found
+  try {
+    found = await controller.resolveAgent(sessionId)
+  } catch (error) {
+    throw new BridgeError('session-unavailable', errorText(error))
+  }
+  if (found?.error) {
+    throw new BridgeError(found.error.code ?? 'session-unavailable', errorText(found.error))
+  }
+  const session = found?.agent?.session
+  if (!session) throw new BridgeError('session-unavailable', `no live Session for ${sessionId}`)
+  return session
 }
 
 /** Open `follow`, keep only its opening snapshot, then release the stream. */
