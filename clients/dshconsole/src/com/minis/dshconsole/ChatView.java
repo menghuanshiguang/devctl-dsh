@@ -57,7 +57,38 @@ public class ChatView extends ScrollView {
         t.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.84f));
         b.addView(t);
         endRow(b);
+        col.addView(copyBar(new String[]{text == null ? "" : text}), fullLp());
         scroll(true);
+    }
+
+    /** 消息右下角的小复制按钮。src 是可变引用，流式期间内容会持续增长。 */
+    private View copyBar(final String[] src) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.END);
+        final TextView t = new TextView(ctx);
+        t.setText("\u29C9 \u590D\u5236");
+        t.setTextSize(Ui.FS_SMALL - 1);
+        t.setTextColor(Ui.MUT);
+        t.setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 6), Ui.dp(ctx, 12), Ui.dp(ctx, 6));
+        t.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String s = src[0] == null ? "" : src[0];
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                            ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("dsh", s));
+                    android.widget.Toast.makeText(ctx, "\u5DF2\u590D\u5236 " + s.length() + " \u5B57",
+                            android.widget.Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    android.widget.Toast.makeText(ctx, "\u590D\u5236\u5931\u8D25\uFF1A" + e.getMessage(),
+                            android.widget.Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        row.addView(t, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return row;
     }
 
     /** 助手整段（历史里的非流式消息）：整宽平铺，不套气泡底。 */
@@ -69,8 +100,11 @@ public class ChatView extends ScrollView {
         hasContent = true;
         spacer(Ui.S4);
         col.addView(richBody(text == null ? "" : text, Ui.TEXT), fullLp());
+        col.addView(copyBar(new String[]{text}), fullLp());
         scroll(true);
     }
+
+    private String[] copySrc;
 
     /** 开始流式：先放一个空文本，之后 append 往里塞。 */
     public void botStart() {
@@ -80,6 +114,8 @@ public class ChatView extends ScrollView {
         curRaw = "";
         cur = plainBody("", Ui.TEXT);
         col.addView(cur, fullLp());
+        copySrc = new String[]{""};
+        col.addView(copyBar(copySrc), fullLp());   // 复制按钮跟着正文一起长
         scroll(true);
     }
 
@@ -87,6 +123,7 @@ public class ChatView extends ScrollView {
         if (chunk == null || chunk.length() == 0) return;
         if (cur == null) botStart();
         curRaw += chunk;
+        if (copySrc != null) copySrc[0] = curRaw;
         cur.setText(md(curRaw + CURSOR));
         scroll(false);
     }
@@ -134,6 +171,116 @@ public class ChatView extends ScrollView {
         fold("\u2726", "思考", text.trim(), Ui.DIM, Ui.SURF2);
     }
 
+    // ── 思考块：流式期间边思考边长，正文一开口自动收起成一行 ──
+    private LinearLayout thinkBox;
+    private TextView thinkHead;
+    private TextView thinkBody;
+    private String thinkRaw = "";
+    private TextView thinkPrev;               // 流式期间只露最新一行
+
+    /** ✦ 思考 · N 字 ▾   phase=1 表示还在思考。 */
+    private String thinkHeadText(int count, int phase, boolean open) {
+        return (phase == 1 ? "\u2726 \u6B63\u5728\u601D\u8003\u2026" : "\u2726 \u601D\u8003")
+                + (count > 0 ? " \u00B7 " + count + " \u5B57" : "")
+                + (open ? " \u25BE" : " \u25B8");
+    }
+
+    public void thinkStart() {
+        if (thinkBox != null) return;
+        dropEmpty();
+        hasContent = true;
+        spacer(Ui.S2);
+        thinkRaw = "";
+        thinkBox = Ui.col(ctx);
+        thinkBox.setBackground(Ui.surf(Ui.SURF2, Ui.R_CARD, ctx));
+        int pad = Ui.dp(ctx, Ui.PAD_CARD);
+        thinkBox.setPadding(pad, Ui.dp(ctx, 10), pad, Ui.dp(ctx, 10));
+
+        final TextView head = new TextView(ctx);
+        head.setTextSize(Ui.FS_SMALL);
+        head.setTextColor(Ui.DIM);
+        final TextView prev = new TextView(ctx);            // 流式期间只露最新一行
+        prev.setTextSize(Ui.FS_SMALL);
+        prev.setTextColor(Ui.MUT);
+        prev.setSingleLine(true);
+        prev.setEllipsize(android.text.TextUtils.TruncateAt.START);
+        final TextView body = new TextView(ctx);            // 全文：默认折叠
+        body.setTextSize(Ui.FS_SMALL - 1);
+        body.setTextColor(Ui.DIM);
+        body.setLineSpacing(0, 1.15f);
+        body.setVisibility(View.GONE);
+        final int[] st = new int[]{0, 1, 0};          // 字数 / 是否还在思考 / 用户是否手动展开过
+        head.setTag(st);
+        head.setText(thinkHeadText(0, 1, false));
+        head.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                boolean open = body.getVisibility() == View.VISIBLE;
+                body.setVisibility(open ? View.GONE : View.VISIBLE);
+                st[1] = 0;
+                st[2] = 1;
+                head.setText(thinkHeadText(st[0], 0, !open));
+                if (prev.getVisibility() == View.VISIBLE) prev.setVisibility(open ? View.VISIBLE : View.GONE);
+                scroll(false);
+            }
+        });
+        thinkBox.addView(head, fullLp());
+        thinkBox.addView(prev, fullLp());
+        thinkBox.addView(body, fullLp());
+        thinkHead = head;
+        thinkPrev = prev;
+        thinkBody = body;
+        col.addView(thinkBox, fullLp());
+        scroll(true);
+    }
+
+    /** 思考正文的最后一行（太长截尾），用于单行预览。 */
+    private String thinkTailLine() {
+        String s = thinkRaw.replace("\r", "");
+        int end = s.length();
+        while (end > 0 && (s.charAt(end - 1) == '\n' || s.charAt(end - 1) == ' ')) end--;
+        if (end == 0) return "";
+        int st = s.lastIndexOf('\n', end - 1) + 1;
+        boolean cut = false;
+        if (end - st > 60) { st = end - 60; cut = true; }
+        return (cut ? "\u2026" : "") + s.substring(st, end).trim();
+    }
+
+    /** 思考增量：默认折叠，只在标题下刷新最新一行。 */
+    public void thinkAppend(String chunk) {
+        if (thinkBox == null) thinkStart();
+        thinkRaw += chunk;
+        if (thinkBody != null) thinkBody.setText(thinkRaw);
+        boolean open = thinkBody != null && thinkBody.getVisibility() == View.VISIBLE;
+        if (thinkPrev != null) {
+            thinkPrev.setText(thinkTailLine());
+            thinkPrev.setVisibility(open ? View.GONE : View.VISIBLE);
+        }
+        if (thinkHead != null && thinkHead.getTag() instanceof int[]) {
+            int[] st = (int[]) thinkHead.getTag();
+            st[0] = thinkRaw.length();
+            thinkHead.setText(thinkHeadText(st[0], 1, open));
+        }
+        scroll(false);
+    }
+
+    /** 思考结束：收起，只留一行「✦ 思考 · N 字 ▸」。 */
+    public void thinkEnd() {
+        if (thinkBox == null) return;
+        if (thinkHead != null && thinkHead.getTag() instanceof int[]) {
+            int[] st = (int[]) thinkHead.getTag();
+            st[0] = thinkRaw.length();
+            st[1] = 0;
+            boolean open = thinkBody != null && thinkBody.getVisibility() == View.VISIBLE;
+            thinkHead.setText(thinkHeadText(st[0], 0, open));
+            if (thinkPrev != null) thinkPrev.setVisibility(View.GONE);
+            if (thinkBody != null && st[2] == 0) thinkBody.setVisibility(View.GONE);
+        }
+        thinkBox = null;
+        thinkHead = null;
+        thinkPrev = null;
+        thinkBody = null;
+    }
+
     /** 提示词注入（host 以 user 记录下发的运行期上下文）。 */
     public void inject(String text) {
         fold("\u2301", "注入上下文", text, Ui.VIOLET, Ui.TINT_INJ);
@@ -169,20 +316,27 @@ public class ChatView extends ScrollView {
             // 展开/收起用「挂上 / 摘下」，不用 setVisibility：隐藏的子项仍可能被布局算进高度，
             // 摘掉的视图物理上不可能占位（组卡上下出现大片空白的根治办法）。
             toolGroupItems = Ui.col(ctx);
+            final LinearLayout myGroup = toolGroup;
+            final LinearLayout myItems = toolGroupItems;
+            final TextView myHead = toolGroupHead;
+            final int[] st = new int[]{0, 0, toolGroupItems.getParent() == null ? 0 : 1};  // 条目数/字数/展开态
+            myGroup.setTag(st);
             toolGroupHead.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    toolGroupOpen = !toolGroupOpen;
-                    if (toolGroupOpen) {
-                        if (toolGroupItems.getParent() == null) {
-                            toolGroup.addView(toolGroupItems, new LinearLayout.LayoutParams(
-                                    LinearLayout.LayoutParams.MATCH_PARENT,
-                                    LinearLayout.LayoutParams.WRAP_CONTENT));
-                        }
+                    boolean wasOpen = myItems.getParent() != null;
+                    if (wasOpen) {
+                        myGroup.removeView(myItems);
                     } else {
-                        toolGroup.removeView(toolGroupItems);
+                        myGroup.addView(myItems, new LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT));
                     }
-                    updateGroupHead();
-                    toggleInPlace(toolGroup);          // 原地展开/收起，别把人甩到列表最底下
+                    st[2] = wasOpen ? 0 : 1;
+                    if (myGroup == toolGroup) {
+                        toolGroupOpen = st[2] == 1;   // 只有"当前组"才同步共享字段
+                    }
+                    myHead.setText(groupHeadText(st[0], st[1], st[2] == 1));
+                    toggleInPlace(myGroup);          // 原地展开/收起，别把人甩到列表最底下
                 }
             });
             Ui.press(toolGroupHead, ctx, 0x00000000, Ui.R_CHIP);
@@ -197,18 +351,29 @@ public class ChatView extends ScrollView {
         return toolGroup;
     }
 
-    /** 组标题：⚙ 工具调用 ×N · 共 M 字 ▸ */
+    /** 组标题文案：⚙ 工具调用 ×N · 共 M 字 ▸（按传入计数生成，多组不串味）。 */
+    private android.text.SpannableStringBuilder groupHeadText(int n, int chars, boolean open) {
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
+        sb.append("\u2699 ").append(n < 2 ? "工具调用" : "工具调用 \u00D7" + n);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(Ui.AMBER), 0, sb.length(), 0);
+        int b = sb.length();
+        sb.append("  ").append(chars + " \u5B57").append(open ? OPEN : SHUT);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(Ui.MUT), b, sb.length(), 0);
+        return sb;
+    }
+
+    /** 刷新当前组标题，并把计数写回该组 tag（收起/展开时要用它）。 */
     private void updateGroupHead() {
         if (toolGroupHead == null) {
             return;
         }
-        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
-        sb.append("\u2699 ").append(toolGroupN < 2 ? "工具调用" : "工具调用 \u00D7" + toolGroupN);
-        sb.setSpan(new android.text.style.ForegroundColorSpan(Ui.AMBER), 0, sb.length(), 0);
-        int b = sb.length();
-        sb.append("  ").append(toolGroupChars + " \u5B57").append(toolGroupOpen ? OPEN : SHUT);
-        sb.setSpan(new android.text.style.ForegroundColorSpan(Ui.MUT), b, sb.length(), 0);
-        toolGroupHead.setText(sb);
+        toolGroupHead.setText(groupHeadText(toolGroupN, toolGroupChars, toolGroupOpen));
+        if (toolGroup != null && toolGroup.getTag() instanceof int[]) {
+            int[] s = (int[]) toolGroup.getTag();
+            s[0] = toolGroupN;
+            s[1] = toolGroupChars;
+            s[2] = toolGroupOpen ? 1 : 0;
+        }
     }
 
     /**
