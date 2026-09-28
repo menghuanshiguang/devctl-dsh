@@ -54,6 +54,15 @@ chmod +x /usr/local/bin/dshctl
 dshctl --version
 ```
 
+`raw.githubusercontent.com` 在国内经常连不上，换下面任一个（都实测可达）：
+
+```sh
+curl -fsSL https://cdn.jsdelivr.net/gh/menghuanshiguang/devctl-dsh@main/cli/dshctl.py \
+  -o /usr/local/bin/dshctl
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/menghuanshiguang/devctl-dsh/main/cli/dshctl.py \
+  -o /usr/local/bin/dshctl
+```
+
 不想联网的话，把 `cli/dshctl.py` 的内容整段粘进 iSH 也行——单文件，没有任何依赖要装。
 
 ## 二、配对
