@@ -1,0 +1,28 @@
+{
+  "name": "devctl-dsh",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Drive a DSH instance from another device over a token-authenticated TCP control port - the DSH half of the devctl family.",
+  "keywords": [
+    "dsh",
+    "devctl",
+    "remote-control",
+    "cli",
+    "deepseek"
+  ],
+  "homepage": "https://github.com/menghuanshiguang/devctl-dsh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/menghuanshiguang/devctl-dsh.git"
+  },
+  "author": "menghuanshiguang",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./cli/dshctl.py": "./cli/dshctl.py"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  }
+}

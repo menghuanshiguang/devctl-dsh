@@ -1,0 +1,16 @@
+# Python 控制端
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# 本地配置（含 token，绝不入库）
+.dshctl.json
+devctl-dsh.json
+dsh-remote.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
