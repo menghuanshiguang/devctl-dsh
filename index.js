@@ -982,8 +982,8 @@ function pushFollowFrame(connection, sessionId, frame) {
       return
     case 'assistant-stream': {
       const inner = frame.frame
-      if (inner?.type === 'chunk' && inner.chunk?.type === 'text-delta' && typeof inner.chunk.text === 'string') {
-        connection.send({ evt: 'delta', data: { sessionId, text: inner.chunk.text } })
+      if (inner?.type === 'chunk' && (inner.chunk?.type === 'text-delta' || inner.chunk?.type === 'reasoning-delta') && typeof inner.chunk.text === 'string') {
+        connection.send({ evt: 'delta', data: { sessionId, text: inner.chunk.text, reasoning: inner.chunk.type === 'reasoning-delta' } })
       }
       return
     }
