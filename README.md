@@ -45,6 +45,7 @@ adb install -r out/dshconsole.apk
 ```
 
 更多细节（协议要点、已知边界、调试开关）见 [clients/dshconsole/README.md](clients/dshconsole/README.md)。
+
 ## 被控端：安装插件
 
 ```bash
