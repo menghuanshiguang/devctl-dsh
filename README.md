@@ -14,6 +14,8 @@ devctl 管的是设备本身（Android / Windows 的壳层、文件、日志）�
                         设置页 devctl 分区 ────┘  端口 / IP / 二维码 / 设备列表
 ```
 
+![DSH 设置页里的 devctl 分区](docs/settings.png)
+
 CLI 的参数手感对齐 `devctl`：
 
 ```bash
