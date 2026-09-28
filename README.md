@@ -4,11 +4,14 @@ devctl 家族的 DSH 接入层：**从另一台设备用 CLI 控制这台机器�
 
 devctl 管的是设备本身（Android / Windows 的壳层、文件、日志）；devctl-dsh 管的是 **DSH 会话**——列会话、发消息、看流式回复、打断、换模型。
 被控端是一个 DSH Host 插件，在 DSH 进程内开一个 token 鉴权的 JSON-Lines TCP 端口；控制端是 `cli/dshctl.py`，单文件、零依赖的 Python 3 脚本。
+配对不用手抄 token——设置页里有一张二维码，手机扫一下就拿到 `dshctl add` 命令。
 
 ```
 手机 / iSH / Termux / 笔记本            跑着 DSH 的机器
   dshctl.py  ────── TCP :7788 ──────►  devctl-dsh 插件 ──► sessionController
    （控制端）          JSON Lines         （被控端）        列会话 / 发消息 / 收事件
+                                              ▲
+                        设置页 devctl 分区 ────┘  端口 / IP / 二维码 / 设备列表
 ```
 
 CLI 的参数手感对齐 `devctl`：
@@ -23,10 +26,10 @@ dshctl add desk  --type dsh     --host 192.168.1.10 --port 7788 --token <TOKEN>
 ## 被控端：安装插件
 
 ```bash
-plugin_manager install_bundle  target=D:\dsh\devdsh\devctl-dsh
+plugin_manager install_bundle  target=<本仓库的绝对路径>
 ```
 
-装完端口立即生效（profile 是 `patchReload: live`）。确认：
+装完端口立即生效（profile 是 `patchReload: live`），设置页里同时出现 devctl 分区。确认：
 
 ```bash
 netstat -ano | findstr :7788
@@ -35,10 +38,27 @@ netstat -ano | findstr :7788
 首次启动生成 token 并写入 `%USERPROFILE%\.dsh\devctl-dsh.json`：
 
 ```json
-{ "token": "7fb9b946…", "host": "0.0.0.0", "port": 7788, "version": "1.1.0", "startedAt": 1790610287877 }
+{ "token": "7fb9b946…", "host": "0.0.0.0", "port": 7788, "version": "1.2.0", "startedAt": 1790610287877 }
 ```
 
 改端口 / 绑定地址：编辑本包 `cordis.patch.yml` 的 `config`，或在 profile 补丁层覆盖同一 `id`。
+
+### 设置页
+
+DSH 设置里会多出一个 **devctl** 分区（在「Agent 预设」和「规则设定」之间），三张卡：
+
+- **监听地址** —— 实际绑定的 `host:port`、本机局域网 IP、掩码后的访问令牌（点「显示」看全）
+- **配对二维码** —— 扫码即可拿到 `dshctl add <ip>:<port> --token …`，二维码下面那行命令可以直接复制
+- **已连接设备** —— 每台连过的设备一行：名字、平台、来源地址、最后活动时间、命令数、在线还是已断开，5 秒自动刷新
+
+页面数据来自同一个 Host web 服务器上的两个只读端点，不需要走 TCP 端口，也不需要浏览器持有 token：
+
+| 端点 | 内容 |
+| --- | --- |
+| `GET /devctl-dsh/status` | 端口、IP、令牌、设备列表的 JSON |
+| `GET /devctl-dsh/qr.svg` | 配对二维码，`?text=` `?dark=` `?light=` 可覆盖 |
+
+二维码是内置的纯 JS 编码器（`qr.js`，byte mode / ECC M / 版本 1–10），不依赖任何第三方包。
 
 ## 控制端：安装 CLI
 
@@ -68,6 +88,7 @@ dshctl.py use <name>                                       # 设默认设备
 dshctl.py rm <name>                                        # 删除设备
 
 dshctl.py ping                     # 连通性 + 鉴权 + 延迟
+dshctl.py peers                    # 哪些设备连过这台机器，现在还在不在
 
 dshctl.py workspaces               # 列出工作区（别名 ws）
 dshctl.py ws-new D:\proj\thing     # 把目录注册成工作区
@@ -151,6 +172,17 @@ dshctl send --image screenshot.png      # 不写文本也合法
 
 被控端读的是**控制端本机的文件**——CLI 在手机上，发的是手机里的图。
 
+### 设备
+
+`peers` 列的是**连过**这台机器的控制端，不是此刻的在线列表——`dshctl` 每条命令都是短连接，跑完就断，所以正常状态就是「已断开」。正在 `watch` / `tail` 的连接会显示在线；断开后记录保留 5 分钟，超过就自动清掉。
+
+```bash
+dshctl peers
+dshctl peers --json | jq -r '.result.items[] | "\(.name) \(.address) \(.live)"'
+```
+
+设置页那张表的正是这份数据。设备名 / 平台 / cwd 由控制端在 `hello` 里自报，被控端只做记录。
+
 `--json` 输出恒为 `{"ok":true,"result":…}` 或 `{"ok":false,"error":{"code","message"}}`，退出码 0/1，适合塞进脚本或交给 agent。
 
 `send` 默认只把回复正文写到 stdout（进度提示走 stderr）；加 `--detail` 才会带上你自己的 prompt、DSH 注入的 runtime context 和 turn 边界。
@@ -160,8 +192,8 @@ dshctl send --image screenshot.png      # 不写文本也合法
 JSON Lines over TCP，请求与响应按 `id` 配对，事件不请自来。
 
 ```jsonc
-// 鉴权（必须是第一条；失败即断开）
-{"id":1,"method":"hello","params":{"token":"…","client":"dshctl/1.1.0"}}
+// 鉴权（必须是第一条；失败即断开）；device 是控制端自报的身份，只用于设备列表
+{"id":1,"method":"hello","params":{"token":"…","client":"dshctl/1.2.0","device":{"name":"phone","platform":"Darwin 24.0","version":"1.2.0","cwd":"/root"}}}
 
 // 请求 → 响应
 {"id":2,"method":"sessions.prompt","params":{"sessionId":"…","mode":"queue","text":"…","images":[{"mediaType":"image/png","data":"<base64>","name":"shot.png"}]}}
@@ -173,7 +205,7 @@ JSON Lines over TCP，请求与响应按 `id` 配对，事件不请自来。
 {"evt":"delta","data":{"sessionId":"…","text":"正在"}}
 ```
 
-方法：`ping`、`sessions.list|create|prompt|cancel|rename|search|tail|watch|unwatch`、`workspaces.list|create|rename|delete`、`permissions.catalog|current|set`、`models.catalog|select`。
+方法：`ping`、`peers.list`、`sessions.list|create|prompt|cancel|rename|search|tail|watch|unwatch`、`workspaces.list|create|rename|delete`、`permissions.catalog|current|set`、`models.catalog|select`。
 
 `workspaces.list` 是靠订阅 `workspaceController.follow` 拿首帧 baseline 实现的（Host 只暴露流式接口）；`permissions.set` 与 `permissions.current` 需要会话对象，被控端经 `sessionController.resolveAgent` 取，因此**对冷会话会触发一次 resume**——不带预设的 `permissions` 命令走投影，绕开这一点。
 
@@ -197,9 +229,12 @@ profile 补丁层给 `dsh-hmr` 扩了监视根，插件源码目录纳入热重�
 
 没有这层时，`dsh-hmr` 的 `baseDir` 落在 DSH 安装目录（`ctx.baseUrl`），而插件源码在 `D:\dsh\devdsh` 下——写文件不触发重载，`disable`/`enable` 和重装 bundle 也不清 ESM 缓存，改动静默失效。加上之后存盘即重载：`dshctl ping` 的 `uptime` 归零、`version` 跟着变。删掉那几行即可恢复默认。
 
+客户端那半（`client.js`）走 DSH 自己的 bundle 图：HMR 轮询它的文件时间戳，变了就推送新 rev 给浏览器。**但有一个例外**——DSH 把「这个包是不是客户端包」的判定按 loader 行缓存到进程重启为止，所以给一个**已经在跑的** DSH 首次加上 `dsh.client` 声明时，那个否定的旧判定会让 `client.js` 一直不进图。`index.js` 里的 `refreshClientBundleGraph` 就处理这一件事：清掉这条判定并让图重新协调本包。全新启动的 DSH 上它是空操作。
+
 ## 安全边界
 
 - **token 等于整台机器的控制权。** 它能列出、创建、驱动本机上的任意会话，等于让远端以本机身份执行任务。
+- **设置页的二维码里就写着 token。** 截图、投屏、共享屏幕时注意——那是完整的控制凭据，不是一串无意义的配对码。
 - **权限预设也能被远端改写。** `dshctl perm danger-full-access` 会放开目标会话的沙箱、把审批设成 never——控制端不必再向本机要一次同意。
 - **只在内网或 VPN 里跑。** 不要做任何公网端口映射；`0.0.0.0` 监听意味着同网段任何设备都能尝试连接——唯一阻碍就是这个 token。
 - 明文传输，没有 TLS。同网段嗅探可以拿到 token。
@@ -218,7 +253,9 @@ New-NetFirewallRule -DisplayName "devctl-dsh" -Direction Inbound -Protocol TCP `
 
 | 路径 | 说明 |
 | --- | --- |
-| `index.js` | 被控端插件：TCP 监听、token 鉴权、事件推送 |
+| `index.js` | 被控端插件：TCP 监听、token 鉴权、事件推送、设置页端点 |
+| `client.js` | 设置页的 devctl 分区（端口 / IP / 二维码 / 设备表） |
+| `qr.js` | 纯 JS 二维码编码器，无依赖 |
 | `cli/dshctl.py` | 控制端 CLI，单文件零依赖 |
 | `cordis.patch.yml` | 加载器补丁：`host` / `port` |
 | `package.json` | bundle 清单 |

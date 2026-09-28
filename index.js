@@ -11,11 +11,19 @@
 import { createServer } from 'node:net'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir, hostname } from 'node:os'
+import { homedir, hostname, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
+import { svg as qrSvg } from './qr.js'
 
-const VERSION = '1.1.0'
+const VERSION = '1.2.0'
 const PROTOCOL = 1
+/** This package's name: the loader row id, the client bundle id, and the graph key. */
+const PACKAGE_NAME = 'devctl-dsh'
+/** Settings-page endpoints, served from the Host web server so the page stays same-origin. */
+const STATUS_PATH = '/devctl-dsh/status'
+const QR_PATH = '/devctl-dsh/qr.svg'
+/** A disconnected peer keeps its row in the settings list for this long. */
+const PEER_LINGER_MS = 5 * 60_000
 /** Prompt image parts accept exactly these media types. */
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 /** Where the control token is persisted, relative to `$DSH_HOME`. */
@@ -72,6 +80,13 @@ export function apply(ctx, config) {
   const token = resolveToken(settings, stateFile, legacyStateFile)
 
   const connections = new Set()
+  /**
+   * Every peer that has authenticated once, keyed by connection id, so the
+   * settings page can still list a device that dropped off moments ago.
+   */
+  const peers = new Map()
+  /** Filled from `server.address()` once the port is bound, for the settings page. */
+  const bound = { host, port }
   const startedAt = Date.now()
   const log = (message) => {
     try {
@@ -93,6 +108,9 @@ export function apply(ctx, config) {
     token,
     stateFile,
     startedAt,
+    connections,
+    peers,
+    bound,
     /** `serveLine` is module-level, so the bridge is what carries logging to it. */
     log,
     warn,
@@ -110,6 +128,11 @@ export function apply(ctx, config) {
       socket,
       authenticated: false,
       client: null,
+      device: null,
+      commands: 0,
+      connectedAt: Date.now(),
+      lastSeenAt: Date.now(),
+      peer: `${socket.remoteAddress ?? 'unknown'}:${socket.remotePort ?? 0}`,
       watches: new Map(),
       buffer: '',
       send(payload) {
@@ -158,14 +181,19 @@ export function apply(ctx, config) {
     socket.on('close', () => {
       connection.dispose()
       connections.delete(connection)
+      if (connection.authenticated) {
+        connection.disconnectedAt = Date.now()
+        peers.set(connection.id, connection)
+      }
     })
   })
 
   ctx.effect(() => {
     server.on('error', warn)
     server.listen(port, host, () => {
-      const bound = server.address()
-      const actualPort = bound && typeof bound === 'object' ? bound.port : port
+      const address = server.address()
+      const actualPort = address && typeof address === 'object' ? address.port : port
+      bound.port = actualPort
       writeState(stateFile, { token, host, port: actualPort, version: VERSION, startedAt })
       log(`listening on ${host}:${actualPort}; control token in ${stateFile}`)
     })
@@ -173,9 +201,47 @@ export function apply(ctx, config) {
       new Promise((resolve) => {
         for (const connection of connections) connection.dispose()
         connections.clear()
+        peers.clear()
         server.close(() => resolve())
       })
   }, 'devctl-dsh.listen')
+
+  installSettingsRoutes(ctx, bridge)
+  refreshClientBundleGraph(ctx)
+}
+
+/**
+ * The Web client graph caches a "not a client package" verdict per loader
+ * specifier until the host process restarts. A host that was already running
+ * when this package gained its `dsh.client` declaration keeps that stale
+ * negative verdict, so the settings section stays invisible until the next
+ * restart. Clear it once and let the graph reconcile this package; on a fresh
+ * host the verdict is already positive and this is a no-op.
+ */
+function refreshClientBundleGraph(ctx) {
+  if (typeof ctx?.inject !== 'function') return
+  ctx.inject(['clientModules'], (host) => {
+    const modules = host?.clientModules
+    if (typeof modules?.clientPath !== 'function') return
+    try {
+      if (modules.clientPath(PACKAGE_NAME) !== undefined) return
+      let matched = false
+      for (const entry of host.loader?.entries?.() ?? []) {
+        if (entry?.options?.name !== PACKAGE_NAME) continue
+        const baseUrl = entry.parent?.tree?.ctx?.baseUrl
+        if (typeof baseUrl !== 'string') continue
+        // The graph keys its verdicts by `<baseUrl>\0<loader name>`.
+        modules.pkgMeta?.delete?.(modules.sourceKey(PACKAGE_NAME, baseUrl))
+        matched = true
+      }
+      if (!matched) return
+      modules.dirty?.add?.(PACKAGE_NAME)
+      modules.flush?.((error) => host.logger?.warn?.(error))
+      host.logger?.info?.('[devctl-dsh] reconciled the Web client bundle graph')
+    } catch (error) {
+      host.logger?.warn?.(error)
+    }
+  })
 }
 
 /** Read the configured token, the one a previous run persisted, or mint a new one. */
@@ -227,6 +293,9 @@ async function serveLine(bridge, connection, line) {
     }
     connection.authenticated = true
     connection.client = typeof params.client === 'string' ? params.client : 'unknown'
+    connection.device = readDevice(params.device, connection)
+    connection.lastSeenAt = Date.now()
+    bridge.peers?.set(connection.id, connection)
     connection.send({
       id,
       ok: true,
@@ -251,6 +320,8 @@ async function serveLine(bridge, connection, line) {
     connection.send({ id, ok: false, error: { code: 'bad-request', message: 'method is required' } })
     return
   }
+  connection.lastSeenAt = Date.now()
+  connection.commands += 1
 
   try {
     const result = await dispatch(bridge, connection, method, params)
@@ -276,6 +347,9 @@ async function dispatch(bridge, connection, method, params) {
   switch (method) {
     case 'ping':
       return { pong: true, time: Date.now(), uptimeMs: Date.now() - bridge.startedAt }
+
+    case 'peers.list':
+      return { items: listPeers(bridge).map(publicPeer) }
 
     case 'sessions.list': {
       const value = await controller.list({}, timeoutSignal(CALL_TIMEOUT_MS))
@@ -424,6 +498,212 @@ async function dispatch(bridge, connection, method, params) {
     default:
       throw new BridgeError('unknown-method', `unknown method: ${method}`)
   }
+}
+
+/**
+ * Peer identity is advisory: an older CLI sends only `client`, and a handshake
+ * must never fail because of it.
+ */
+function readDevice(raw, connection) {
+  const source = raw !== null && typeof raw === 'object' ? raw : {}
+  const text = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : '')
+  return {
+    name: text(source.name) || connection.client || 'unknown',
+    platform: text(source.platform),
+    version: text(source.version),
+    cwd: text(source.cwd),
+  }
+}
+
+/** Live connections plus peers that disconnected within the linger window, most recent first. */
+function listPeers(bridge) {
+  const now = Date.now()
+  const out = []
+  for (const [id, connection] of bridge.peers ?? []) {
+    const live = bridge.connections?.has(connection) === true
+    if (!live && now - (connection.disconnectedAt ?? 0) > PEER_LINGER_MS) {
+      bridge.peers.delete(id)
+      continue
+    }
+    out.push({ connection, live })
+  }
+  out.sort((a, b) => b.connection.lastSeenAt - a.connection.lastSeenAt)
+  return out
+}
+
+function publicPeer({ connection, live }) {
+  const device = connection.device ?? {}
+  return {
+    name: device.name || connection.client || 'unknown',
+    platform: device.platform || '',
+    version: device.version || '',
+    cwd: device.cwd || '',
+    address: connection.peer,
+    connectedAt: connection.connectedAt,
+    lastSeenAt: connection.lastSeenAt,
+    commands: connection.commands ?? 0,
+    live,
+  }
+}
+
+function localAddresses() {
+  const out = []
+  try {
+    for (const [name, entries] of Object.entries(networkInterfaces())) {
+      for (const entry of entries ?? []) {
+        if (entry.family !== 'IPv4' || entry.internal) continue
+        out.push({ name, address: entry.address })
+      }
+    }
+  } catch {
+    /* an address list is a convenience, never a reason to fail a request */
+  }
+  return out
+}
+
+/** Prefer a private LAN address: that is the one another device can actually reach. */
+function firstLanAddress() {
+  const all = localAddresses()
+  const isPrivate = (address) =>
+    /^10\./.test(address) || /^192\.168\./.test(address) || /^172\.(1[6-9]|2\d|3[01])\./.test(address)
+  return (all.find((entry) => isPrivate(entry.address)) ?? all[0])?.address ?? '127.0.0.1'
+}
+
+/** The one line a user pastes into `dshctl` on the other device. */
+function pairingCommand(ip, port, token) {
+  return `dshctl add home ${ip}:${port} --token ${token}`
+}
+
+function statusPayload(bridge) {
+  const addresses = localAddresses()
+  const ip = firstLanAddress()
+  const port = bridge.bound?.port ?? DEFAULT_PORT
+  const peers = listPeers(bridge).map(publicPeer)
+  const token = bridge.token ?? ''
+  return {
+    ok: true,
+    server: 'devctl-dsh',
+    version: VERSION,
+    protocol: PROTOCOL,
+    listenHost: bridge.bound?.host ?? DEFAULT_HOST,
+    port,
+    ip,
+    addresses: addresses.map((entry) => entry.address),
+    hostname: hostname(),
+    token,
+    command: pairingCommand(ip, port, token),
+    qrPath: QR_PATH,
+    startedAt: bridge.startedAt,
+    uptimeMs: Date.now() - bridge.startedAt,
+    peers,
+    livePeers: peers.filter((peer) => peer.live).length,
+  }
+}
+
+/** Colours land in an SVG attribute, so only strict literal hex passes. */
+function normaliseColor(value, fallback) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(value) ? value : fallback
+}
+
+function sendJson(response, status, payload) {
+  const body = Buffer.from(JSON.stringify(payload), 'utf8')
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': String(body.length),
+    'cache-control': 'no-store',
+  })
+  response.end(body)
+}
+
+/**
+ * The settings page is served by the Host web server, so it reads this plugin
+ * through the same origin instead of reaching across the TCP port.
+ */
+function installSettingsRoutes(ctx, bridge) {
+  if (typeof ctx?.inject !== 'function') return
+  ctx.inject(['webServer'], (host) => {
+    if (typeof host?.webServer?.register !== 'function') return
+    host.effect(
+      () => {
+        const disposers = []
+        const add = (spec, label) => {
+          try {
+            disposers.push(host.webServer.register(spec, label))
+          } catch (error) {
+            bridge.warn?.(error)
+          }
+        }
+        add(
+          {
+            kind: 'exact',
+            path: STATUS_PATH,
+            handler: (request, response) => {
+              if (request.method !== 'GET' && request.method !== 'HEAD') {
+                response.writeHead(405, { allow: 'GET' })
+                response.end()
+                return
+              }
+              try {
+                sendJson(response, 200, statusPayload(bridge))
+              } catch (error) {
+                bridge.warn?.(error)
+                sendJson(response, 500, { ok: false, error: errorText(error) })
+              }
+            },
+          },
+          'devctl-dsh: settings status',
+        )
+        add(
+          {
+            kind: 'exact',
+            path: QR_PATH,
+            handler: (request, response) => {
+              if (request.method !== 'GET' && request.method !== 'HEAD') {
+                response.writeHead(405, { allow: 'GET' })
+                response.end()
+                return
+              }
+              try {
+                const url = new URL(request.url ?? QR_PATH, 'http://127.0.0.1')
+                const status = statusPayload(bridge)
+                const payload = url.searchParams.get('text') || status.command
+                const body = Buffer.from(
+                  qrSvg(payload, {
+                    dark: normaliseColor(url.searchParams.get('dark'), '#000000'),
+                    light: normaliseColor(url.searchParams.get('light'), '#ffffff'),
+                    quiet: 2,
+                    scale: 8,
+                  }),
+                  'utf8',
+                )
+                response.writeHead(200, {
+                  'content-type': 'image/svg+xml; charset=utf-8',
+                  'content-length': String(body.length),
+                  'cache-control': 'no-store',
+                })
+                response.end(request.method === 'HEAD' ? undefined : body)
+              } catch (error) {
+                bridge.warn?.(error)
+                response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+                response.end('qr unavailable')
+              }
+            },
+          },
+          'devctl-dsh: pairing QR',
+        )
+        return () => {
+          for (const dispose of disposers) {
+            try {
+              dispose?.()
+            } catch (error) {
+              bridge.warn?.(error)
+            }
+          }
+        }
+      },
+      'devctl-dsh: settings routes',
+    )
+  })
 }
 
 /** A short control call needs a cancel path; `AbortSignal.timeout` is not everywhere. */

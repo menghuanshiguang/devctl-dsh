@@ -25,11 +25,12 @@ import argparse
 import base64
 import json
 import os
+import platform
 import socket
 import sys
 import time
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 PROTOCOL = 1
 DEFAULT_PORT = 7788
 DEFAULT_TIMEOUT = 30.0
@@ -251,7 +252,14 @@ class Client(object):
         except socket.error as exc:
             raise CliError("cannot reach %s:%d - %s" % (self.host, self.port, exc))
         self.sock.settimeout(self.timeout)
-        self.info = self.request("hello", {"token": self.token, "client": "dshctl/%s" % VERSION})
+        self.info = self.request(
+            "hello",
+            {
+                "token": self.token,
+                "client": "dshctl/%s" % VERSION,
+                "device": device_identity(),
+            },
+        )
         return self
 
     def close(self):
@@ -408,6 +416,37 @@ def _human_duration(milliseconds):
     if seconds < 3600:
         return "%dm %ds" % (seconds // 60, seconds % 60)
     return "%dh %dm" % (seconds // 3600, (seconds % 3600) // 60)
+
+
+def device_identity():
+    """What the Host lists this machine as on its devctl settings page."""
+    try:
+        label = ("%s %s" % (platform.system(), platform.release())).strip()
+    except Exception:
+        label = sys.platform
+    try:
+        name = socket.gethostname() or "unknown"
+    except Exception:
+        name = "unknown"
+    try:
+        cwd = os.getcwd()
+    except Exception:
+        cwd = ""
+    return {
+        "name": name,
+        "platform": label or sys.platform,
+        "version": VERSION,
+        "cwd": cwd,
+    }
+
+
+def clock_of(milliseconds):
+    if not isinstance(milliseconds, (int, float)) or milliseconds <= 0:
+        return "-"
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(milliseconds / 1000.0))
+    except (ValueError, OSError, OverflowError):
+        return "-"
 
 
 def fetch_sessions(client, timeout=None):
@@ -661,6 +700,42 @@ def cmd_ping(args, config, opts):
         sys.stdout.write("latency   %d ms\n" % latency)
         sys.stdout.flush()
     return result
+
+
+def print_peers(items):
+    if not items:
+        sys.stdout.write(dim("no device has connected yet\n"))
+        return
+    for item in items:
+        state = green("online") if item.get("live") else dim("offline")
+        sys.stdout.write(
+            "%s  %s %s\n" % (state, bold(item.get("name") or "unknown"), dim("(%s)" % (item.get("address") or "-")))
+        )
+        label = " ".join(part for part in (item.get("platform"), item.get("version")) if part)
+        if label:
+            sys.stdout.write("    client     %s\n" % label)
+        if item.get("cwd"):
+            sys.stdout.write("    cwd        %s\n" % item["cwd"])
+        sys.stdout.write(
+            "    last seen  %s   commands %d\n" % (clock_of(item.get("lastSeenAt")), item.get("commands") or 0)
+        )
+
+
+def cmd_peers(args, config, opts):
+    name, device = resolve_device(config, opts["device"])
+    client = Client(device, opts["timeout"]).connect()
+    try:
+        result = client.request("peers.list")
+    finally:
+        client.close()
+    items = result.get("items") if isinstance(result, dict) else None
+    items = items if isinstance(items, list) else []
+    live = sum(1 for item in items if item.get("live"))
+    if not opts["json"]:
+        sys.stdout.write("%s  %d online / %d known\n" % (green("ok"), live, len(items)))
+        print_peers(items)
+        sys.stdout.flush()
+    return {"device": name, "items": items, "live": live, "total": len(items)}
 
 
 def cmd_sessions(args, config, opts):
@@ -1366,6 +1441,9 @@ def build_parser():
 
     ping = sub.add_parser("ping", help="check reachability and credentials")
     ping.set_defaults(func=cmd_ping)
+
+    peers = sub.add_parser("peers", help="list devices that connected to the host")
+    peers.set_defaults(func=cmd_peers)
 
     sessions = sub.add_parser("sessions", help="list Sessions", aliases=["ls", "list"])
     sessions.add_argument("-n", "--limit", type=int, default=25, help="show at most N Sessions (0 = all)")
