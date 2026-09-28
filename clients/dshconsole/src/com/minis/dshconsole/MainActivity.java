@@ -1,0 +1,544 @@
+package com.minis.dshconsole;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.os.Build;
+import android.os.Bundle;
+import android.text.InputType;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/** 主壳：顶栏 + 聊天页（主区）+ 左侧抽屉（工作区 / 对话列表）。 */
+public class MainActivity extends Activity {
+    public Store store;
+    public String dshName;
+    public Dsh dsh;
+    public Devctl devctl;
+
+    private FrameLayout root;
+    private LinearLayout col;
+    private FrameLayout content;
+    private LinearLayout side;
+    private View scrim;
+    private TextView title;
+    private TextView status;
+    private Spinner devSpin; // 兼容旧代码，实际不再显示
+
+    private Tab[] tabs;
+    private int current = 1; // 默认就是聊天页
+    public Tab tabChat;
+    public Sidebar sidebar;
+
+    private boolean drawerOpen = false;
+    private int sideW = 0;
+
+    @Override
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
+        requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        getWindow().setStatusBarColor(Ui.PANEL);
+        getWindow().setNavigationBarColor(Ui.PANEL);
+        store = new Store(this);
+        List<Store.Dev> list = store.devices("dsh");
+        if (list.isEmpty()) {
+            Store.Dev d = new Store.Dev();
+            d.name = "home";
+            d.host = "127.0.0.1";   // agent 与本机 app 同机
+            d.port = 5556;
+            store.putDevice("dsh", d);
+            store.setDef("dsh", "home");
+        }
+        dshName = store.def("dsh");
+        if (dshName.length() == 0 || store.find("dsh", dshName) == null) {
+            dshName = store.devices("dsh").get(0).name;
+            store.setDef("dsh", dshName);
+        }
+
+        tabs = new Tab[]{new TabSessions(this), new TabChat(this), new TabManage(this),
+                new TabDevice(this), new TabEvents(this)};
+        tabChat = tabs[1];
+
+        sideW = (int) (getResources().getDisplayMetrics().widthPixels * 0.82);
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Ui.BG);
+
+        col = Ui.col(this);
+        col.setBackgroundColor(Ui.BG);
+        col.addView(topBar());
+        content = new FrameLayout(this);
+        col.addView(content, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(col, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        buildDrawer();
+        setContentView(root);
+
+        sidebar = new Sidebar(this);
+        side.addView(sidebar.view(), new LinearLayout.LayoutParams(
+                sideW, LinearLayout.LayoutParams.MATCH_PARENT));
+
+        select(1);
+        connectDsh(false);
+    }
+
+    // ---------------- 顶栏 ----------------
+
+    private View topBar() {
+        LinearLayout bar = Ui.row(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackgroundColor(Ui.PANEL);
+        int p = Ui.dp(this, 8);
+        bar.setPadding(p, Ui.dp(this, 8), p, Ui.dp(this, 8));
+
+        TextView menu = icon("☰", new Runnable() {
+            public void run() {
+                openDrawer();
+            }
+        });
+        bar.addView(menu);
+
+        LinearLayout mid = Ui.col(this);
+        mid.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 4), 0);
+        title = Ui.tv(this, "DSH 控制台", 15.5f, Ui.TEXT);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mid.addView(title);
+        status = Ui.tv(this, "未连接", 11f, Ui.DIM);
+        status.setSingleLine(true);
+        status.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mid.addView(status);
+        bar.addView(mid, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        bar.addView(icon("＋", new Runnable() {
+            public void run() {
+                newSession();
+            }
+        }));
+        return bar;
+    }
+
+    private TextView icon(String text, final Runnable r) {
+        TextView t = Ui.tv(this, text, 17f, Ui.TEXT);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(Ui.dp(this, 9), Ui.dp(this, 5), Ui.dp(this, 9), Ui.dp(this, 5));
+        t.setBackground(Ui.bg(Ui.PANEL2, 9, this));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = Ui.dp(this, 4);
+        t.setLayoutParams(lp);
+        t.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                r.run();
+            }
+        });
+        return t;
+    }
+
+    /** 侧栏「设置」二级菜单的动作分发（原来是顶栏 ⋮ 的系统白弹窗）。 */
+    void runMenuAction(int w) {
+        switch (w) {
+            case 0: newSession(); break;
+            case 1: sidebar.refresh(); toast("已刷新"); break;
+            case 2: chatTab().menuHistory(); break;
+            case 3: chatTab().menuPick(); break;
+            case 4: chatTab().menuClear(); break;
+            case 5: chatTab().cancel(); break;
+            case 6: select(2); break;
+            case 7: select(4); break;
+            case 8: dialogDevices(); break;
+            default: closeDsh(); connectDsh(true); break;
+        }
+        if (w != 1) closeDrawer();          // 动作做完收回抽屉；刷新留着看结果
+    }
+
+    // ---------------- 抽屉 ----------------
+
+    private void buildDrawer() {
+        final FrameLayout layer = new FrameLayout(this);
+        scrim = new View(this);
+        scrim.setBackgroundColor(0xAA000000);
+        scrim.setAlpha(0f);
+        scrim.setVisibility(View.GONE);
+        scrim.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                closeDrawer();
+            }
+        });
+        layer.addView(scrim, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        side = Ui.col(this);
+        side.setBackgroundColor(Ui.PANEL);
+        side.setTranslationX(-sideW);
+        FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(
+                sideW, FrameLayout.LayoutParams.MATCH_PARENT);
+        layer.addView(side, slp);
+        layer.setVisibility(View.GONE);
+        layer.setTag("layer");
+        root.addView(layer, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private View layer() {
+        return root.findViewWithTag("layer");
+    }
+
+    public void openDrawer() {
+        if (drawerOpen) return;
+        drawerOpen = true;
+        View l = layer();
+        root.bringChildToFront(l);          // 蒙层必须压在最上层，否则 FAB/其它视图会吃掉"点空白关闭"
+        l.setVisibility(View.VISIBLE);
+        side.setTranslationX(-sideW);
+        scrim.setVisibility(View.VISIBLE);   // 之前始终是 GONE：蒙层不存在 → 点空白永远关不掉
+        scrim.setAlpha(0f);
+        side.animate().translationX(0).setDuration(220).start();
+        scrim.animate().alpha(1f).setDuration(220).start();
+        sidebar.refresh();
+    }
+
+    public void closeDrawer() {
+        if (!drawerOpen) return;
+        drawerOpen = false;
+        final View l = layer();
+        side.animate().translationX(-sideW).setDuration(200).start();
+        scrim.animate().alpha(0f).setDuration(200).withEndAction(new Runnable() {
+            public void run() {
+                l.setVisibility(View.GONE);
+            }
+        }).start();
+    }
+
+    public boolean drawerOpen() {
+        return drawerOpen;
+    }
+
+    // ---------------- 页面 ----------------
+
+    public void select(int idx) {
+        if (tabs == null) return;
+        if (idx == 0) {
+            openDrawer();
+            return;
+        }
+        if (idx < 0 || idx >= tabs.length) return;
+        closeDrawer();                        // 从抽屉里选了入口 → 自己收回，不用再手动关
+        if (current != idx && current >= 0 && tabs[current] != null) tabs[current].onHide();
+        current = idx;
+        content.removeAllViews();
+        content.addView(tabs[idx].view(), new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        tabs[idx].onShow();
+        String[] names = {"会话", "DSH 控制台", "权限与模型", "设备", "事件"};
+        if (idx == 1) {
+            String t = chatTab().currentTitle();
+            setTitle(t.length() > 0 ? t : names[1]);
+        } else {
+            setTitle(names[idx]);
+        }
+    }
+
+    public void setTitle(String t) {
+        title.setText(t == null || t.length() == 0 ? "DSH 控制台" : t);
+    }
+
+    public void newSession() {
+        closeDrawer();
+        sidebar.newSession();
+    }
+
+    public void openChat(String sessionId, String t) {
+        store.setLastSession(dshName, sessionId);
+        chatTab().loadSession(sessionId, t);
+        select(1);
+        setTitle(t == null || t.length() == 0 ? "会话" : t);
+        closeDrawer();
+    }
+
+    // ---------------- 设备管理 ----------------
+
+    /** 报错处一键进连接设置（填 dsh token / 改地址）。 */
+    public void openConnSettings() {
+        Store.Dev d = store.find("dsh", dshName);
+        if (d == null) dialogAddDsh();
+        else dialogEditDsh(d);
+    }
+
+    public void reloadDevices() {
+        if (devSpin == null) {
+            sidebar.refresh();
+            return;
+        }
+        List<String> names = new ArrayList<String>();
+        for (Store.Dev d : store.devices("dsh")) names.add(d.name);
+        android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_dropdown_item, names);
+        devSpin.setAdapter(ad);
+        int idx = names.indexOf(dshName);
+        if (idx >= 0) devSpin.setSelection(idx);
+    }
+
+    private void dialogAddDsh() {
+        LinearLayout box = Ui.col(this);
+        int p = Ui.dp(this, 14);
+        box.setPadding(p, p, p, p);
+        final EditText paste = Ui.input(this, "① 粘贴配对命令（推荐）");
+        final EditText name = Ui.input(this, "② 设备名，例如 home");
+        name.setText("home");
+        final EditText host = Ui.input(this, "② 主机 IP，例如 192.168.2.7");
+        host.setText("127.0.0.1");
+        final EditText port = Ui.input(this, "② 端口，dsh host 默认 7788");
+        port.setText("7788");
+        port.setInputType(InputType.TYPE_CLASS_NUMBER);
+        final EditText token = Ui.input(this, "② token（dsh host 状态页可复制）");
+        box.addView(paste);
+        box.addView(Ui.dim(this, "直接粘贴 host 面板里那条命令即可，自动填好下面全部："));
+        box.addView(Ui.dim(this, "dshctl add home 192.168.2.7:7788 --token xxx"));
+        box.addView(name);
+        box.addView(host);
+        box.addView(port);
+        box.addView(token);
+        new AlertDialog.Builder(this).setTitle("添加 DSH 设备").setView(box)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        Store.Dev dev = new Store.Dev();
+                        dev.name = name.getText().toString().trim();
+                        dev.host = host.getText().toString().trim();
+                        dev.port = parseInt(port.getText().toString().trim(), 7788);
+                        dev.token = token.getText().toString().trim();
+                        String cmd = paste.getText().toString().trim();
+                        if (cmd.length() > 0) {
+                            applyPairCmd(cmd, dev);
+                            toast("已解析：" + dev.name + " " + dev.host + ":" + dev.port);
+                        }
+                        if (dev.name.length() == 0 || dev.host.length() == 0) {
+                            toast("名称和主机不能为空");
+                            return;
+                        }
+                        store.putDevice("dsh", dev);
+                        dshName = dev.name;
+                        store.setDef("dsh", dev.name);
+                        reloadDevices();
+                        closeDsh();
+                        connectDsh(true);
+                    }
+                }).setNegativeButton("取消", null).show();
+    }
+
+    /** 解析 dshctl 配对命令：dshctl add home 192.168.2.7:7788 --token xxx */
+    private void applyPairCmd(String cmd, Store.Dev dev) {
+        String[] t = cmd.trim().replaceAll("\\s+", " ").split(" ");
+        for (int i = 0; i < t.length; i++) {
+            String s = t[i];
+            if (s.equals("--token") && i + 1 < t.length) {
+                dev.token = t[++i];
+            } else if (s.equals("add") && i + 1 < t.length && !t[i + 1].startsWith("-")) {
+                dev.name = t[++i];
+            } else if (s.matches("[0-9A-Za-z_.\\-]+(:[0-9]+)?")) {
+                int c = s.indexOf(':');
+                String h = c > 0 ? s.substring(0, c) : s;
+                int pp = c > 0 ? parseInt(s.substring(c + 1), 0) : 0;
+                if (h.indexOf('.') > 0 || pp > 0) {
+                    dev.host = h;
+                    if (pp > 0) {
+                        dev.port = pp;
+                    }
+                }
+            }
+        }
+    }
+
+    private void dialogDevices() {
+        final List<Store.Dev> list = store.devices("dsh");
+        final String[] items = new String[list.size() + 1];
+        for (int i = 0; i < list.size(); i++) {
+            Store.Dev d = list.get(i);
+            items[i] = d.name + "   " + d.addr() + "   token:" + mask(d.token);
+        }
+        items[list.size()] = "＋ 添加设备…";
+        new AlertDialog.Builder(this).setTitle("DSH 设备").setItems(items, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface d, int which) {
+                if (which == list.size()) {
+                    dialogAddDsh();
+                    return;
+                }
+                final Store.Dev dev = list.get(which);
+                new AlertDialog.Builder(MainActivity.this).setTitle(dev.name)
+                        .setItems(new String[]{"设为当前", "编辑", "删除"}, new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface dd, int w) {
+                                if (w == 0) {
+                                    dshName = dev.name;
+                                    store.setDef("dsh", dev.name);
+                                    reloadDevices();
+                                    closeDsh();
+                                    connectDsh(true);
+                                    sidebar.refresh();
+                                } else if (w == 1) {
+                                    dialogEditDsh(dev);
+                                } else {
+                                    store.remove("dsh", dev.name);
+                                    reloadDevices();
+                                    toast("已删除 " + dev.name);
+                                }
+                            }
+                        }).show();
+            }
+        }).show();
+    }
+
+    private void dialogEditDsh(Store.Dev dev) {
+        LinearLayout box = Ui.col(this);
+        int p = Ui.dp(this, 14);
+        box.setPadding(p, p, p, p);
+        final EditText host = Ui.input(this, "主机");
+        host.setText(dev.host);
+        final EditText port = Ui.input(this, "端口");
+        port.setText(String.valueOf(dev.port));
+        port.setInputType(InputType.TYPE_CLASS_NUMBER);
+        final EditText token = Ui.input(this, "token");
+        token.setText(dev.token);
+        box.addView(host);
+        box.addView(port);
+        box.addView(token);
+        new AlertDialog.Builder(this).setTitle("编辑 " + dev.name).setView(box)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        dev.host = host.getText().toString().trim();
+                        dev.port = parseInt(port.getText().toString().trim(), 5556);
+                        dev.token = token.getText().toString().trim();
+                        store.putDevice("dsh", dev);
+                        closeDsh();
+                        toast("已保存");
+                    }
+                }).setNegativeButton("取消", null).show();
+    }
+
+    // ---------------- 连接 ----------------
+
+    public TabChat chatTab() {
+        return (TabChat) tabChat;
+    }
+
+    public Dsh requireDsh() throws Exception {
+        if (dsh != null && dsh.alive()) return dsh;
+        Store.Dev dev = store.find("dsh", dshName);
+        if (dev == null) throw new Exception("未配置 DSH 设备");
+        final Dsh c = Dsh.open(dev, 12000, "dshconsole/1.0", "Android " + Build.VERSION.RELEASE);
+        synchronized (this) {
+            dsh = c;
+        }
+        ui(new Runnable() {
+            public void run() {
+                setStatus("已连接 " + dev.addr() + " · " + c.hostName, Ui.GREEN);
+            }
+        });
+        return c;
+    }
+
+    /** 开一条独立连接（长驻事件流用，避免和 request/response 抢读）。 */
+    public Dsh openDsh(int timeoutMs) throws Exception {
+        Store.Dev dev = store.find("dsh", dshName);
+        if (dev == null) throw new Exception("未配置 DSH 设备");
+        return Dsh.open(dev, timeoutMs, "dshconsole/1.0", "Android " + Build.VERSION.RELEASE);
+    }
+
+    public void connectDsh(final boolean loud) {
+        setStatus("连接中…", Ui.AMBER);
+        bg(new Runnable() {
+            public void run() {
+                try {
+                    requireDsh();
+                    if (sidebar != null) sidebar.refresh();
+                } catch (final Exception e) {
+                    ui(new Runnable() {
+                        public void run() {
+                            setStatus("连接失败：" + e.getMessage(), Ui.RED);
+                        }
+                    });
+                    if (loud) toast(e.getMessage());
+                }
+            }
+        });
+    }
+
+    public void closeDsh() {
+        final Dsh c = dsh;
+        dsh = null;
+        if (c != null) {
+            bg(new Runnable() {
+                public void run() {
+                    c.close();
+                }
+            });
+        }
+    }
+
+    public void resetDsh() {
+        closeDsh();
+    }
+
+    // ---------------- 工具 ----------------
+
+    public void bg(Runnable r) {
+        Thread t = new Thread(r);
+        t.setDaemon(true);
+        t.start();
+    }
+
+    public void ui(Runnable r) {
+        runOnUiThread(r);
+    }
+
+    public void toast(String msg) {
+        final String m = msg == null ? "" : msg;
+        ui(new Runnable() {
+            public void run() {
+                Toast.makeText(MainActivity.this, m, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    public void setStatus(String text, int color) {
+        status.setText(text);
+        status.setTextColor(color);
+    }
+
+    public static int parseInt(String s, int dflt) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (Exception e) {
+            return dflt;
+        }
+    }
+
+    public static String mask(String t) {
+        if (t == null) return "无";
+        if (t.length() <= 8) return t;
+        return t.substring(0, 4) + "…" + t.substring(t.length() - 4);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (drawerOpen) {
+            closeDrawer();
+        } else if (current != 1) {
+            select(1);
+        } else {
+            super.onBackPressed();
+        }
+    }
+}
