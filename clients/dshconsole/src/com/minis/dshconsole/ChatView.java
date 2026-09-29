@@ -36,7 +36,7 @@ public class ChatView extends ScrollView {
         setVerticalScrollBarEnabled(false);
         setClipToPadding(false);
         setFillViewport(true);
-        setPadding(Ui.dp(c, Ui.PAD_H), Ui.dp(c, Ui.S2), Ui.dp(c, Ui.PAD_H), Ui.dp(c, 14));   // 底部只留一点点，多余空白藏到输入卡底下
+        setPadding(Ui.dp(c, Ui.PAD_H), Ui.dp(c, Ui.S2), Ui.dp(c, Ui.PAD_H), Ui.dp(c, 56));   // 底部留 ≥ 负 margin 的量：内容不会被输入卡压住
         col = Ui.col(c);
         addView(col, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -581,10 +581,12 @@ public class ChatView extends ScrollView {
     public void note(String text, int color) {
         dropEmpty();
         hasContent = true;
-        spacer(Ui.S2);
+        spacer(Ui.S1);
         String s = text == null ? "" : text;
         if (color == Ui.DIM) {
-            col.addView(Ui.sep(ctx, s), fullLp());
+            LinearLayout sv = Ui.sep(ctx, s);
+            sv.setPadding(0, Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3));   // 分隔行上下留白收窄，别在底部空一大块
+            col.addView(sv, fullLp());
         } else {
             TextView t = Ui.tv(ctx, s, Ui.FS_SMALL, color);
             t.setGravity(Gravity.CENTER);
@@ -1219,6 +1221,15 @@ public class ChatView extends ScrollView {
                 }
             }
         }, 320);
+        postDelayed(new Runnable() {
+            public void run() {
+                int y = bottomY();
+                if (getScrollY() < y - 2) {          // 复制行/图片结算更晚，再补一枪
+                    ignoreScrollUntil = System.currentTimeMillis() + 150;
+                    scrollTo(0, y);
+                }
+            }
+        }, 900);
     }
 
     /** 内容真实底部：列高 + 上下内边距 − 视口高（少算 padding 就会差一截）。 */
