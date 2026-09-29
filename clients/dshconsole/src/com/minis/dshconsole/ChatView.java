@@ -217,6 +217,15 @@ public class ChatView extends ScrollView {
         return true;
     }
 
+    /** 视口高度变了（键盘弹起/收起）→ 本来贴着底部就继续贴着最新的消息。 */
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (oldh > 0 && h != oldh && following) {
+            snapToBottom();                    // 键盘抬起时把消息一起顶上去，别被盖住
+        }
+    }
+
     @Override
     protected void onScrollChanged(int l, int t, int oldl, int oldt) {
         super.onScrollChanged(l, t, oldl, oldt);
