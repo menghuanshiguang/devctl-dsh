@@ -1076,6 +1076,7 @@ public class TabChat extends Tab {
                     refreshHostState("connect");          // 按钮语义先按 host 的真实状态摆好
                     startStateWatch();
                     refreshInbox();                       // host 那边还排着的消息，坞里也得有
+                    probeCapabilities();                  // 老插件要提前说一声，别等功能报错了才发现
                     statusBase = "已连接 · " + TabSessions.shortId(sessionId);
                     setStateStatus();
                 } catch (final Exception e) {
@@ -2295,6 +2296,45 @@ public class TabChat extends Tab {
         if (now - lastInboxAt < 500) return;              // 节流：一次变动会连着来好几条
         lastInboxAt = now;
         refreshInbox();
+    }
+
+    /**
+     * 探一下 PC 侧插件是不是新版：`sessions.inbox` 是那一批一起加的。
+     * 旧版直接回 unknown method —— 那就把"哪些功能会失效 + 怎么更新"一次说清楚，
+     * 别让用户在图片/删除/审批上一个个撞墙。
+     */
+    private void probeCapabilities() {
+        if (sessionId.length() == 0) return;
+        act.bg(new Runnable() {
+            public void run() {
+                Dsh c = null;
+                boolean old = false;
+                try {
+                    c = act.openDsh(8000);
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", sessionId);
+                    c.request("sessions.inbox", p, 15000, null);
+                } catch (Exception e) {
+                    String m = String.valueOf(e.getMessage()).toLowerCase();
+                    old = m.contains("unknown method") || m.contains("unsupported");
+                } finally {
+                    if (c != null) {
+                        try {
+                            c.close();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+                if (!old) return;
+                act.ui(new Runnable() {
+                    public void run() {
+                        cv.note("PC 侧插件是旧版：图片、排队/插话、审批卡、删除对话 这些会失效。"
+                                + "在 PC 上 git pull 后重启插件就好（仓库 host-patch/PROMPT-images-inbox.md 有清单）",
+                                Ui.AMBER);
+                    }
+                });
+            }
+        });
     }
 
     /** 跟 host 对账信箱：它在的我留着（并记下 itemId），它没有的就是已经跑起来了。 */

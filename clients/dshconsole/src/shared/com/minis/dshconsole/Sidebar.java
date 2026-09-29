@@ -724,9 +724,14 @@ public class Sidebar {
                                         }
                                     });
                                 } catch (final Exception e) {
+                                    final String m = String.valueOf(e.getMessage());
                                     act.ui(new Runnable() {
                                         public void run() {
-                                            act.toast("删除失败：" + e.getMessage());
+                                            if (m.toLowerCase().contains("unknown method")) {
+                                                act.toast("PC 侧插件还没有 sessions.archive：先在 PC 上 git pull 再重启插件");
+                                            } else {
+                                                act.toast("删除失败：" + m);
+                                            }
                                         }
                                     });
                                 } finally {
