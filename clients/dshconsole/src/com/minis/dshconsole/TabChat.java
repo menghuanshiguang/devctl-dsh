@@ -141,10 +141,13 @@ public class TabChat extends Tab {
         card.setBackground(Ui.bg(Ui.SURF2, 22, act));
         int cp = Ui.dp(act, 6);
         card.setPadding(cp, cp, cp, cp);
-        card.addView(modeRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         card.addView(bar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        modeRow.setPadding(Ui.dp(act, 12), Ui.dp(act, 3), Ui.dp(act, 6), 0);   // 和输入文字左对齐
+        LinearLayout.LayoutParams mlp2 = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        mlp2.topMargin = Ui.dp(act, 2);
+        card.addView(modeRow, mlp2);                 // 三颗挪到输入框下面
 
         LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，浮在背景上
         outer.setOrientation(LinearLayout.VERTICAL);
@@ -190,11 +193,11 @@ public class TabChat extends Tab {
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         t.setMaxWidth(Ui.dp(act, 132));
-        t.setPadding(Ui.dp(act, 10), Ui.dp(act, 5), Ui.dp(act, 10), Ui.dp(act, 5));
-        t.setBackground(Ui.bg(active ? 0x2E0A84FF : Ui.SURF3, 15, act));
+        t.setPadding(Ui.dp(act, 2), Ui.dp(act, 3), Ui.dp(act, 14), Ui.dp(act, 3));   // 无底色，靠间距分隔
+        t.setBackgroundColor(0x00000000);                                            // 背景去掉，只留文字
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.rightMargin = Ui.dp(act, 6);
+        lp.rightMargin = 0;
         t.setLayoutParams(lp);
         t.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { tap.run(); }
