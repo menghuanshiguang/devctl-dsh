@@ -354,10 +354,8 @@ public class TabChat extends Tab {
         LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，同时当阴影的呼吸位
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setPadding(Ui.dp(act, 12), Ui.dp(act, 8), Ui.dp(act, 12), Ui.dp(act, 10));  // 上/下收窄：消息贴近卡片，卡片也更靠屏幕底
-        // 原来这里是 ShadowBg + LAYER_TYPE_SOFTWARE：软阴影要软层，而软层每帧走 CPU，
-        // 抽屉/键盘动画期间就是它拖帧。改成平底 + 一条发丝边，观感一致但便宜得多。
-        outer.setBackground(Ui.bg(Ui.CARD, 22, act));
-        outer.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
+        outer.setBackground(new Ui.ShadowBg(act, 22, 12, 2, 0x33000000, Ui.CARD));  // 一点点软阴影
+        outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
         box.addView(outer);
         pageBox = box;                       // 整页容器：IME 动画作用在它身上（MainActivity 回调进来）
