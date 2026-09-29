@@ -89,9 +89,9 @@ public class TabChat extends Tab {
                 android.view.Gravity.TOP));
         // 底部渐隐（照 DeepSeek）：消息滑到输入卡上方时化进背景，不是硬切、也不留白带
         View fadeBot = new View(act);
-        fadeBot.setBackground(new Ui.FadeBg(Ui.dp(act, 20), Ui.BG & 0x00FFFFFF, Ui.BG));
+        fadeBot.setBackground(new Ui.FadeBg(Ui.dp(act, 12), Ui.BG & 0x00FFFFFF, Ui.BG));
         cvWrap.addView(fadeBot, new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 20),
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 12),
                 android.view.Gravity.BOTTOM));
         android.widget.FrameLayout.LayoutParams jlp = new android.widget.FrameLayout.LayoutParams(
                 Ui.dp(act, 40), Ui.dp(act, 40),
@@ -163,7 +163,7 @@ public class TabChat extends Tab {
 
         LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，同时当阴影的呼吸位
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setPadding(Ui.dp(act, 12), Ui.dp(act, 12), Ui.dp(act, 12), Ui.dp(act, 14));
+        outer.setPadding(Ui.dp(act, 12), Ui.dp(act, 8), Ui.dp(act, 12), Ui.dp(act, 10));  // 上/下收窄：消息贴近卡片，卡片也更靠屏幕底
         outer.setBackground(new Ui.ShadowBg(act, 22, 12, 2, 0x33000000, Ui.CARD));  // 一点点软阴影
         outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
