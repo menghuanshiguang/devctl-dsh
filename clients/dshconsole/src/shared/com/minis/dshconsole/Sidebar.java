@@ -14,6 +14,10 @@ import org.json.JSONObject;
 
 /** 侧边抽屉：工作区 + 对话列表（ChatGPT 式）。 */
 public class Sidebar {
+
+    /** 抽屉底部那条「设备 / 事件 / 模型·权限」分段控件：默认不显示。 */
+    private static final boolean SHOW_FOOT_SEG = false;
+
     private android.widget.PopupWindow menu;
     private final MainActivity act;
     private final LinearLayout root;
@@ -70,6 +74,13 @@ public class Sidebar {
             public void onTextChanged(CharSequence s, int st, int bf, int c) { }
         });
 
+        // 「工作区」这一条固定在搜索框下面：它是这一块的总表头，跟着列表滚上去被切一半很难看
+        root.addView(section("工作区", "＋", new Runnable() {
+            public void run() {
+                newWorkspace();
+            }
+        }));
+
         ScrollView sc = new ScrollView(a);
         sc.setVerticalScrollBarEnabled(false);
         LinearLayout list = Ui.col(a);
@@ -77,11 +88,6 @@ public class Sidebar {
         root.addView(sc, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        list.addView(section("工作区", "＋", new Runnable() {
-            public void run() {
-                newWorkspace();
-            }
-        }));
         wsBox = Ui.col(a);
         list.addView(wsBox);
 
@@ -93,20 +99,24 @@ public class Sidebar {
         sessBox = Ui.col(a);
         list.addView(sessBox);
 
-        LinearLayout foot = Ui.row(a);
-        foot.setPadding(0, Ui.dp(a, 6), 0, 0);
-        LinearLayout seg = Ui.row(a);                                   // 一整条分段控件，不再是三块砖
-        seg.setGravity(Gravity.CENTER_VERTICAL);
-        seg.setBackground(Ui.bg(Ui.SURF2, 9, a));
-        int sp2 = Ui.dp(a, 3);
-        seg.setPadding(sp2, sp2, sp2, sp2);
-        seg.addView(footBtn("设备", 3));
-        seg.addView(segLine(a));
-        seg.addView(footBtn("事件", 4));
-        seg.addView(segLine(a));
-        seg.addView(footBtn("模型/权限", 2));
-        foot.addView(seg);
-        root.addView(foot);
+        // 「设备 / 事件 / 模型·权限」那条分段控件不再摆在抽屉里（按用户要求隐藏）。
+        // 相应页面还在，从侧栏卡片或设置里进即可；要恢复就把下面这段注释放开。
+        if (SHOW_FOOT_SEG) {
+            LinearLayout foot = Ui.row(a);
+            foot.setPadding(0, Ui.dp(a, 6), 0, 0);
+            LinearLayout seg = Ui.row(a);                               // 一整条分段控件，不再是三块砖
+            seg.setGravity(Gravity.CENTER_VERTICAL);
+            seg.setBackground(Ui.bg(Ui.SURF2, 9, a));
+            int sp2 = Ui.dp(a, 3);
+            seg.setPadding(sp2, sp2, sp2, sp2);
+            seg.addView(footBtn("设备", 3));
+            seg.addView(segLine(a));
+            seg.addView(footBtn("事件", 4));
+            seg.addView(segLine(a));
+            seg.addView(footBtn("模型/权限", 2));
+            foot.addView(seg);
+            root.addView(foot);
+        }
 
         // 底部：⚙ 设置（新活动，实时读 DSH 设置）+ ⚒ 调试（原来的本地运维菜单）
         View line = new View(act);
@@ -680,6 +690,7 @@ public class Sidebar {
 
     private View section(String label, String action, final Runnable r) {
         LinearLayout row = Ui.row(act);
+        row.setBackgroundColor(Ui.BG);            // 不透明底：滚动时不会跟在它下面的行"叠字"
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(Ui.dp(act, 2), Ui.dp(act, 12), 0, Ui.dp(act, 4));
         TextView t = Ui.tv(act, label, 11.5f, Ui.DIM);
