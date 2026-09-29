@@ -54,12 +54,25 @@ public class MainActivity extends Activity {
                 | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);   // 回到前台不自动弹输入法（点输入框才弹）          // 先刷调色板，后面所有控件才拿得到对的颜色
         // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-        getWindow().setStatusBarColor(Ui.BG);      // 状态栏跟顶栏、消息区连成一片
-        getWindow().setNavigationBarColor(Ui.PANEL);
-        if (!Ui.DARK) {               // 亮色下状态栏图标要压黑，不然白字看不见
-            getWindow().getDecorView().setSystemUiVisibility(
-                    android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        // Android 15(API 35) 起 setStatusBarColor 失效（设了也没用）——想"状态栏跟界面同色"只剩正路：
+        // 内容画到栏底下 + 栏透明 + 由 inset 给内容补内边距。监听装在 decor 上（装 content 上收不到）。
+        getWindow().setStatusBarColor(0x00000000);
+        getWindow().setNavigationBarColor(0x00000000);
+        android.view.View decor = getWindow().getDecorView();
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            if (!Ui.DARK) {
+                getWindow().getInsetsController().setSystemBarsAppearance(
+                        android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                        android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+            }
+        } else {
+            decor.setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | (Ui.DARK ? 0 : android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR));
         }
+        installInsets();            // 系统栏内边距 + IME 高度转给聊天页
         store = new Store(this);
         // 本地版：环境没装好/没跑起来，先把启用引导摆出来（远端版 hasRuntime() 为 false，永不进这里）
         final LocalEnv env = Cores.get().runtime();
@@ -115,6 +128,45 @@ public class MainActivity extends Activity {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * 一套统一的 inset 处理，**装在 decor 上**（装在 content 容器上收不到，上一版就是这么翻的车）：
+     *   - 状态栏/导航栏内边距补给 root（配合透明栏 = 沉浸式，栏底色就是 app 自己那层）；
+     *   - 键盘弹起时底部内边距让位给聊天页的整页上抬动画。
+     */
+    private void installInsets() {
+        final android.view.View decor = getWindow().getDecorView();
+        decor.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            private String lastTag = "";
+
+            public android.view.WindowInsets onApplyWindowInsets(android.view.View v,
+                                                                 android.view.WindowInsets insets) {
+                int top = 0, bottom = 0, ime = 0;
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
+                    top = bars.top;
+                    bottom = bars.bottom;
+                    ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                } else {
+                    top = insets.getSystemWindowInsetTop();
+                    bottom = insets.getSystemWindowInsetBottom();
+                }
+                String tag = top + "/" + bottom + "/" + ime;
+                if (!tag.equals(lastTag)) {
+                    lastTag = tag;
+                    android.util.Log.i("DshInset", "bars top=" + top + " bottom=" + bottom + " ime=" + ime);
+                }
+                if (root != null) {
+                    root.setPadding(0, top, 0, ime > 0 ? 0 : bottom);   // 键盘起来时底部交给动画层
+                }
+                if (tabChat instanceof TabChat) {
+                    ((TabChat) tabChat).onImeInset(ime);
+                }
+                return insets;
+            }
+        });
+        decor.requestApplyInsets();
     }
 
     // ---------------- 顶栏 ----------------

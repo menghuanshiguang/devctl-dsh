@@ -129,31 +129,25 @@ public class TabChat extends Tab {
      * 位移由我们自己按 IME 那条 inset 做 220ms 平移动画 —— 整页（消息列表 + 输入卡）一起滑上来，
      * 不会出现"输入卡上去了、消息被键盘压住"的割裂感。
      */
-    private void installImeAnimation(final View composer) {
-        if (android.os.Build.VERSION.SDK_INT < 30) return;        // 30 以下拿不到 IME 类型 inset，就保持系统行为
-        try {
-            final View rootView = act.getWindow().getDecorView();
-            rootView.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-                private int last = -1;
-
-                public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
-                    int ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
-                    if (ime != last) {
-                        last = ime;
-                        composer.animate().cancel();
-                        composer.animate()
-                                .translationY(-ime)
-                                .setDuration(ime == 0 ? 180 : 220)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                                .start();
-                    }
-                    return insets;
-                }
-            });
-            rootView.requestApplyInsets();
-        } catch (Throwable ignored) {
-        }
+    /**
+     * 输入法上抬动画：由 MainActivity 的 inset 监听回调进来（参数是 IME 高度 px）。
+     * 整页（消息列表 + 输入卡）一起平移：弹出 220ms、收起 180ms。
+     */
+    public void onImeInset(final int ime) {
+        if (pageBox == null || android.os.Build.VERSION.SDK_INT < 30) return;
+        if (ime == lastIme) return;
+        lastIme = ime;
+        android.util.Log.i("DshIme", "IME inset → " + ime + "px，" + (ime == 0 ? "落回 180ms" : "上抬 220ms"));
+        pageBox.animate().cancel();
+        pageBox.animate()
+                .translationY(-ime)
+                .setDuration(ime == 0 ? 180 : 220)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
     }
+
+    private View pageBox;
+    private int lastIme = -1;
 
     /** 装图片加载器：只有聊天页知道该用哪条连接去问 host 要字节。 */
     private void installImgLoader() {
@@ -364,7 +358,7 @@ public class TabChat extends Tab {
         outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
         box.addView(outer);
-        installImeAnimation(box);            // 输入法弹出时整页（列表+输入卡）一起"托"上去
+        pageBox = box;                       // 整页容器：IME 动画作用在它身上（MainActivity 回调进来）
         return box;
     }
 
