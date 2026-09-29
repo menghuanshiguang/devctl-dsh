@@ -61,6 +61,25 @@ public class Ui {
         @Override public void setColorFilter(android.graphics.ColorFilter f) { p.setColorFilter(f); }
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
+
+    /** 竖直线性渐变底：盖在列表顶上，把滚上来的内容"化"掉，跟顶栏同色收口（不是硬切）。 */
+    public static class FadeBg extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint p = new android.graphics.Paint();
+
+        public FadeBg(int heightPx, int from, int to) {
+            p.setShader(new android.graphics.LinearGradient(0, 0, 0, heightPx, from, to,
+                    android.graphics.Shader.TileMode.CLAMP));
+        }
+
+        @Override public void draw(android.graphics.Canvas cv) {
+            android.graphics.Rect b = getBounds();
+            cv.drawRect(b.left, b.top, b.right, b.bottom, p);
+        }
+
+        @Override public void setAlpha(int a) { p.setAlpha(a); }
+        @Override public void setColorFilter(android.graphics.ColorFilter f) { p.setColorFilter(f); }
+        @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+    }
     public static boolean DARK = true;               // 当前是否深色，亮色时状态栏图标要压黑
 
     /**
