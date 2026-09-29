@@ -1882,11 +1882,15 @@ public class TabChat extends Tab {
         } else if ("event".equals(kind)) {
             renderEvent(r.optString("type", ""), r);
         } else if ("turn-start".equals(kind)) {
-            cv.note("▷ 回合 " + r.optLong("turn", 0), Ui.DIM);
+            // 「▷ 回合 N」这类内部计数不再往对话里写（要排查看 logcat 就行）
         } else if ("turn-end".equals(kind)) {
             String reason = r.optString("reason", "");
             // 记录 seq：下面统一更新（末尾）
-            cv.note("— 回合结束" + (reason.length() > 0 ? " · " + reason : ""), Ui.DIM);
+            // 正常收尾（completed）不写这行 —— 过程组表头/页脚已经说明一切；
+            // 异常收尾另有更具体的提示（下面那些 fail/已打断/上限…），这里只兜底非 completed 的怪值
+            if (reason.length() > 0 && !"completed".equals(reason)) {
+                cv.note("— 回合结束 · " + reason, Ui.DIM);
+            }
             cv.snapToBottom();                     // 收尾再钉一次真正的底部
         }
         if (seq >= 0) lastRecordSeq = seq;         // 给下一条用户消息算分叉点
