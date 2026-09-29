@@ -29,6 +29,7 @@ public class Ui {
     public static int CODE_BG, CODE_FG, ICODE_BG, ICODE_FG;
     public static int TINT_TOOL, TINT_ERR, TINT_INJ;
     public static int PANEL, PANEL2;                 // 兼容旧名
+    public static int CARD, CHIP_BG, CHIP_BD;        // 输入卡片底 / 胶囊底 / 胶囊描边
     public static boolean DARK = true;               // 当前是否深色，亮色时状态栏图标要压黑
 
     /**
@@ -59,6 +60,12 @@ public class Ui {
             TINT_TOOL = 0xFFF2F2F7; TINT_ERR = 0xFFFFEDEE; TINT_INJ = 0xFFF4EEFF;
         }
         THEIRS = 0x00000000;                         // 对方无气泡，直接铺底
+        // 输入卡片 / 胶囊：亮色下白底卡靠细边立住，胶囊是淡蓝底蓝字（DeepSeek 那种）
+        if (DARK) {
+            CARD = 0xFF2C2C30; CHIP_BG = 0xFF243449; CHIP_BD = 0xFF33507A;
+        } else {
+            CARD = 0xFFFFFFFF; CHIP_BG = 0xFFEDF3FF; CHIP_BD = 0xFFCFE0FB;
+        }
         PANEL = SURF;
         PANEL2 = SURF2;
     }
