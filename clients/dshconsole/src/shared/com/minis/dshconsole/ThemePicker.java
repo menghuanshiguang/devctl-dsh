@@ -71,7 +71,12 @@ final class ThemePicker {
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT));
 
-        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(act).setView(holder).create();
+        // 不用 AlertDialog：它的"面板"会把自定义视图按屏幕撑开（就是那张大灰卡）。
+        // 换成裸 Dialog + setContentView，窗口尺寸自己说了算。
+        final android.app.Dialog dlg = new android.app.Dialog(act);
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dlg.setContentView(holder);
+        dlg.setCanceledOnTouchOutside(true);
         ok.setOnClickListener(new android.view.View.OnClickListener() {
             public void onClick(android.view.View v) {
                 store.set("theme", chosen[0]);
@@ -89,14 +94,13 @@ final class ThemePicker {
                 android.view.Window w = dlg.getWindow();
                 if (w == null) return;
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
-                // 关键：自定义视图的对话框必须自己定宽高，否则系统按面板默认撑满屏幕，
-                // 就出现"一张大灰卡里只有标题、下面全空"（用户截图）。
                 int width = (int) (act.getResources().getDisplayMetrics().widthPixels * 0.86f);
                 w.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-                // 留个日志：万一样式还是不对，我能直接读出实际尺寸，不用靠猜
                 android.util.Log.i("DshTheme", "外观弹层: width=" + width
-                        + " 屏幕宽=" + act.getResources().getDisplayMetrics().widthPixels
-                        + " 卡片子行数=" + card.getChildCount());
+                        + " 屏宽=" + act.getResources().getDisplayMetrics().widthPixels
+                        + " 卡片行数=" + card.getChildCount()
+                        + " 卡片高=" + card.getHeight()
+                        + " holder高=" + holder.getHeight());
             }
         });
         dlg.show();
