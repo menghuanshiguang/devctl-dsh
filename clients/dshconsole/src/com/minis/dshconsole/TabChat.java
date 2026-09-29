@@ -143,7 +143,7 @@ public class TabChat extends Tab {
         card.setPadding(cp, cp, cp, cp);
         card.addView(bar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        modeRow.setPadding(Ui.dp(act, 12), Ui.dp(act, 3), Ui.dp(act, 6), 0);   // 和输入文字左对齐
+        modeRow.setPadding(Ui.dp(act, 8), Ui.dp(act, 4), Ui.dp(act, 6), 0);   // 和输入文字左对齐
         LinearLayout.LayoutParams mlp2 = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         mlp2.topMargin = Ui.dp(act, 2);
@@ -193,11 +193,11 @@ public class TabChat extends Tab {
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         t.setMaxWidth(Ui.dp(act, 132));
-        t.setPadding(Ui.dp(act, 2), Ui.dp(act, 3), Ui.dp(act, 14), Ui.dp(act, 3));   // 无底色，靠间距分隔
-        t.setBackgroundColor(0x00000000);                                            // 背景去掉，只留文字
+        t.setPadding(Ui.dp(act, 11), Ui.dp(act, 5), Ui.dp(act, 11), Ui.dp(act, 5));
+        t.setBackground(Ui.bg(active ? 0x2E0A84FF : Ui.SURF3, 15, act));   // 胶囊自己的底恢复
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.rightMargin = 0;
+        lp.rightMargin = Ui.dp(act, 6);
         t.setLayoutParams(lp);
         t.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { tap.run(); }
