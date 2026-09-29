@@ -1618,10 +1618,37 @@ public class TabChat extends Tab {
                 || low.indexOf("\ncwd:") >= 0 || low.indexOf("<runtime") >= 0;
     }
 
+    /**
+     * 模型偶尔把自家协议的残留吐在**消息最开头**（实测原文：`m00049</ap> 小代码酱。`）。
+     * 只剥掉开头这一小段「m+数字</标签>」或「<标签>」，正文一个字都不动；
+     * 其余位置的尖括号片段交给 ChatView.tagAt() 按等宽次级色显示。
+     */
+    private static String stripLeadingArtifact(String s) {
+        if (s == null) return "";
+        String t = s.trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^m?\\d{2,}\\s*</[A-Za-z][A-Za-z0-9]{0,12}>\\s*").matcher(t);
+        if (m.find()) {
+            logRaw("stripped", t.substring(0, Math.min(t.length(), m.end() + 20)));
+            return t.substring(m.end());
+        }
+        return s;
+    }
+
+    /** 文本里出现尖括号时把原文打进 logcat：定位"怪标记"到底是什么（tag=DshRaw）。 */
+    private static void logRaw(String where, String text) {
+        if (text == null || text.indexOf('<') < 0) return;
+        try {
+            android.util.Log.i("DshRaw", where + ": " + DshConsole.clamp(text.replace((char) 10, (char) 32), 400));
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void renderRecord(JSONObject r) {
         String kind = r.optString("kind", r.optString("type", "?"));
         if ("user".equals(kind)) {
             String txt = r.optString("text", "");
+            logRaw("user", txt);
             ArrayList<Img> imgs = Img.list(r.optJSONArray("images"));
             if (!imgs.isEmpty()) logImg("user images n=" + imgs.size());
             // 协议层不区分「我自己发的」和「host 注入的运行期上下文」，两者都是 user 记录：
@@ -1634,6 +1661,8 @@ public class TabChat extends Tab {
             applyQueueSplice(r.optJSONArray("inserted")); // 队列变了：重新跟 host 对一次账
         } else if ("assistant".equals(kind)) {
             String at = r.optString("text", "");
+            logRaw("assistant", at);
+            at = stripLeadingArtifact(at);
             if (at.length() > 0) cv.bot(DshConsole.clamp(at, 8000));
             ArrayList<Img> aim = Img.list(r.optJSONArray("images"));
             if (!aim.isEmpty()) {
