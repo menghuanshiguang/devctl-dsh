@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path'
 import { svg as qrSvg } from './qr.js'
 import { DEFAULT_WEB_PORT, installRemoteWeb } from './remote-web.js'
 
-const VERSION = '1.3.0'
+const VERSION = '1.4.0'
 const PROTOCOL = 1
 /** This package's name: the loader row id, the client bundle id, and the graph key. */
 const PACKAGE_NAME = 'devctl-dsh'
@@ -31,13 +31,26 @@ const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif
 const STATE_NAME = 'devctl-dsh.json'
 /** Pre-rename state file, read once so already-paired clients keep working. */
 const LEGACY_STATE_NAME = 'dsh-remote.json'
-const MAX_LINE_BYTES = 4 * 1024 * 1024
+const MAX_LINE_BYTES = 12 * 1024 * 1024
 const DEFAULT_HOST = '0.0.0.0'
 const DEFAULT_PORT = 7788
 /** Every short control call is bounded; `follow` is the only unbounded read. */
 const CALL_TIMEOUT_MS = 30_000
 const TAIL_TIMEOUT_MS = 20_000
 const TRUNCATE_CHARS = 4_000
+/** Queue previews stay short: the phone shows one or two lines per row. */
+const QUEUE_TEXT_CHARS = 1_200
+/**
+ * Re-encode targets for `sessions.image`. The Host stores a normalized object already, but a
+ * full-size photo still base64s past the transport frame, so ask the attachment service for a
+ * bounded variant instead of shipping raw bytes.
+ */
+const IMAGE_TARGETS = {
+  thumb: { width: 704, height: 704, maxBytes: 320_000 },
+  full: { width: 2048, height: 2048, maxBytes: 1_600_000 },
+}
+/** One `sessions.image` reply must stay well under MAX_LINE_BYTES. */
+const MAX_IMAGE_BASE64 = 3_200_000
 
 /** A rejection the CLI receives as `{ok:false, error:{code,message}}`. */
 class BridgeError extends Error {
@@ -383,6 +396,17 @@ async function dispatch(bridge, connection, method, params) {
       return { items: (value?.items ?? []).map(publicSummary) }
     }
 
+    // 单个会话的实时状态：客户端拿它决定「可发送 / 停止发送」，不要自己猜回合跑没跑完。
+    // running=false 但队列里还有活的情况，controller 自己会置回 true。
+    case 'sessions.state': {
+      const id = typeof params.sessionId === 'string' ? params.sessionId : ''
+      if (id.length === 0) throw new BridgeError('bad-request', '缺少 sessionId')
+      const value = await controller.list({}, timeoutSignal(CALL_TIMEOUT_MS))
+      const found = (value?.items ?? []).find((one) => (one?.sessionId ?? one?.id) === id)
+      if (found === undefined) throw new BridgeError('not-found', `没有这个会话：${id}`)
+      return { state: publicSummary(found) }
+    }
+
     case 'sessions.create':
       return controller.create(
         {
@@ -407,15 +431,57 @@ async function dispatch(bridge, connection, method, params) {
       const content = []
       if (text.length > 0) content.push({ type: 'text', text })
       for (const image of images) content.push(image)
-      return controller.prompt(
+      // 客户端拿 requestId 对账：排队中的消息要能被撤回/插话，得先能认出它来。
+      // 允许客户端自己铸（harness 的 SessionRequestId 就是客户端铸的），这样它发出去前就知道自己是谁。
+      const requestId = typeof params.requestId === 'string' && params.requestId.length > 0
+        ? params.requestId
+        : randomUUID()
+      const value = await controller.prompt(
         {
-          requestId: randomUUID(),
+          requestId,
           sessionId: params.sessionId,
           mode: params.mode === 'steer' ? 'steer' : 'queue',
           content,
         },
         timeoutSignal(CALL_TIMEOUT_MS),
       )
+      return { ...(value ?? {}), requestId }
+    }
+
+    /**
+     * 取一张会话里出现过的图片。客户端只从记录里拿到元数据（attachmentId/尺寸），
+     * 真要显示时按需取；`size` 选档：thumb 走 704px/320KB 重编码，full 走 2048px/1.6MB。
+     */
+    case 'sessions.image': {
+      requireSessionId(params)
+      const ref = imageRef(params.attachment ?? params, params.attachmentId ?? params.id)
+      const size = params.size === 'full' ? 'full' : 'thumb'
+      return readImage(bridge, params.sessionId, ref, size)
+    }
+
+    /** 改一条还在排队里的消息：编辑（只支持纯文本）/ 撤下 / 立刻插话。 */
+    case 'sessions.queue': {
+      requireSessionId(params)
+      const itemId = typeof params.itemId === 'string' ? params.itemId : ''
+      if (itemId.length === 0) throw new BridgeError('bad-request', 'itemId is required')
+      const action = queueAction(params.action)
+      const value = await controller.updateQueue({ sessionId: params.sessionId, itemId, action })
+      return { accepted: value?.accepted === true, itemId, action: action.kind }
+    }
+
+    /** 信箱快照：手机重新进会话时先要一份当前排队内容，之后靠 inbox 事件增量维护。 */
+    case 'sessions.inbox': {
+      requireSessionId(params)
+      const session = await sessionOf(bridge, params.sessionId)
+      const projections = requireService(bridge, 'sessionProjections')
+      const snapshot = projections.snapshot(session, ['inbox'])
+      const state = snapshot?.values?.inbox ?? {}
+      return {
+        sessionId: params.sessionId,
+        asOfSeq: typeof snapshot?.asOfSeq === 'number' ? snapshot.asOfSeq : undefined,
+        nextTurn: (Array.isArray(state['next-turn']) ? state['next-turn'] : []).map(inboxItem),
+        nextStep: (Array.isArray(state['next-step']) ? state['next-step'] : []).map(inboxItem),
+      }
     }
 
     case 'sessions.cancel':
@@ -915,8 +981,103 @@ function parseImages(raw) {
   return images
 }
 
-/** `modelSelection` is a {lastUsed, next} projection; flatten it to "provider/model". */
-function modelSelectionText(projection) {
+/**
+ * 记录里的图片元数据 → 附件引用。客户端把 event 里的 `images[]` 原样回传即可；
+ * attachmentId 是唯一权威字段，其余尺寸只用于回填引用（缓存/校验用）。
+ */
+function imageRef(input, fallbackId) {
+  const source = input !== null && typeof input === 'object' ? input : {}
+  const attachmentId = typeof source.attachmentId === 'string' && source.attachmentId.length > 0
+    ? source.attachmentId
+    : (typeof fallbackId === 'string' ? fallbackId : '')
+  if (attachmentId.length === 0) throw new BridgeError('bad-request', 'attachmentId is required')
+  const mediaType = typeof source.mediaType === 'string' && IMAGE_TYPES.has(source.mediaType)
+    ? source.mediaType
+    : 'image/png'
+  const ref = {
+    attachmentId,
+    mediaType,
+    bytes: Number.isFinite(source.bytes) && source.bytes >= 0 ? source.bytes : 0,
+    width: Number.isFinite(source.width) && source.width >= 0 ? source.width : 0,
+    height: Number.isFinite(source.height) && source.height >= 0 ? source.height : 0,
+  }
+  if (typeof source.name === 'string' && source.name.length > 0) ref.name = source.name
+  return ref
+}
+
+/** 队列动作：只放行 Host 认识的那三种，别把客户端的手滑变成远端异常。 */
+function queueAction(raw) {
+  const action = raw !== null && typeof raw === 'object' ? raw : {}
+  if (action.kind === 'remove') return { kind: 'remove' }
+  if (action.kind === 'steer') return { kind: 'steer' }
+  if (action.kind === 'edit') {
+    const text = typeof action.text === 'string' ? action.text : ''
+    if (text.trim().length === 0) throw new BridgeError('bad-request', 'edit requires non-empty text')
+    return { kind: 'edit', content: [{ type: 'text', text }] }
+  }
+  throw new BridgeError('bad-request', `unsupported queue action: ${String(action.kind)}`)
+}
+
+/**
+ * 图片字节出网。先让附件服务按目标档重编码（Host 侧归一化过的对象也可能有好几 MB），
+ * 重编码不可用时退回 `sessionController.attachment`（它按会话日志授权、原样返回全尺寸）。
+ */
+async function readImage(bridge, sessionId, ref, size) {
+  const store = requireService(bridge, 'attachments')
+  const target = IMAGE_TARGETS[size]
+  let data
+  let meta = ref
+  let variantId
+  try {
+    const variant = await store.readImageRequest(ref, target, timeoutSignal(CALL_TIMEOUT_MS))
+    if (variant?.data !== undefined && variant.data !== null) {
+      data = variant.data
+      variantId = variant.variantId
+      meta = {
+        ...ref,
+        mediaType: typeof variant.mediaType === 'string' ? variant.mediaType : ref.mediaType,
+        width: Number.isFinite(variant.width) ? variant.width : ref.width,
+        height: Number.isFinite(variant.height) ? variant.height : ref.height,
+      }
+    }
+  } catch (error) {
+    bridge.log?.(`sessions.image: re-encode failed, falling back to the raw attachment (${errorText(error)})`)
+  }
+  if (data === undefined) {
+    const controller = bridge.ctx.sessionController
+    const value = await controller.attachment({ sessionId, attachmentId: ref.attachmentId })
+    const encoded = typeof value?.data === 'string' ? value.data : ''
+    if (encoded.length === 0) throw new BridgeError('not-found', 'attachment bytes are unavailable')
+    if (encoded.length > MAX_IMAGE_BASE64) {
+      throw new BridgeError('image-too-large', `image is ${encoded.length} base64 chars; this build cannot preview it`)
+    }
+    return {
+      attachmentId: ref.attachmentId,
+      mediaType: typeof value?.attachment?.mediaType === 'string' ? value.attachment.mediaType : ref.mediaType,
+      bytes: value?.attachment?.bytes ?? Math.floor(encoded.length * 3 / 4),
+      width: value?.attachment?.width ?? ref.width,
+      height: value?.attachment?.height ?? ref.height,
+      size: 'raw',
+      base64: encoded,
+    }
+  }
+  const base64 = Buffer.from(data).toString('base64')
+  if (base64.length > MAX_IMAGE_BASE64) {
+    throw new BridgeError('image-too-large', `image is ${base64.length} base64 chars; this build cannot preview it`)
+  }
+  return {
+    attachmentId: ref.attachmentId,
+    mediaType: meta.mediaType,
+    bytes: data.length,
+    width: meta.width,
+    height: meta.height,
+    size,
+    variantId,
+    base64,
+  }
+}
+
+/** `modelSelection` is a {lastUsed, next} projection; flatten it to "provider/model". */function modelSelectionText(projection) {
   if (typeof projection === 'string') return projection
   if (projection === null || typeof projection !== 'object') return undefined
   const chosen = projection.next ?? projection.lastUsed
@@ -1109,8 +1270,19 @@ function pushFollowFrame(connection, sessionId, frame) {
       return
     case 'assistant-stream': {
       const inner = frame.frame
-      if (inner?.type === 'chunk' && (inner.chunk?.type === 'text-delta' || inner.chunk?.type === 'reasoning-delta') && typeof inner.chunk.text === 'string') {
-        connection.send({ evt: 'delta', data: { sessionId, text: inner.chunk.text, reasoning: inner.chunk.type === 'reasoning-delta' } })
+      const chunk = inner?.chunk
+      if (inner?.type !== 'chunk' || !chunk) return
+      const where = { sessionId, turn: inner.turn, step: inner.step }
+      if ((chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && typeof chunk.text === 'string') {
+        connection.send({ evt: 'delta', data: { ...where, text: chunk.text, reasoning: chunk.type === 'reasoning-delta' } })
+        return
+      }
+      // 工具参数是流式长出来的：先按 callId 报个空壳，参数边到边补，客户端才能显示「准备中」
+      if (chunk.type === 'tool-call-delta') {
+        connection.send({
+          evt: 'tool-delta',
+          data: { ...where, callId: chunk.id, index: chunk.index, name: chunk.name, text: chunk.argumentsDelta ?? '' },
+        })
       }
       return
     }
@@ -1130,7 +1302,15 @@ function describeEvent(event) {
   const seq = event?.seq
   switch (event?.type) {
     case 'user/message':
-      return { kind: 'user', seq, text: textOf(data.content) }
+      return {
+        kind: 'user',
+        seq,
+        turn: data.turn,
+        id: typeof data.id === 'string' ? data.id : undefined,
+        rpcId: typeof data.source?.rpcId === 'string' ? data.source.rpcId : undefined,
+        text: textOf(data.content),
+        images: imagesOf(data.content),
+      }
     case 'assistant/message':
       return {
         kind: 'assistant',
@@ -1138,21 +1318,47 @@ function describeEvent(event) {
         turn: data.turn,
         step: data.step,
         text: textOf(data.message?.content),
+        reasoning: reasoningOf(data.message?.content),
+        calls: callsOf(data.message?.content),
+        images: imagesOf(data.message?.content),
+        stream: typeof data.stream === 'string' ? data.stream : undefined,
         interrupted: data.interrupted === true,
       }
     case 'tool/call':
-      return { kind: 'tool-call', seq, name: data.name, arguments: truncate(data.arguments) }
+      return {
+        kind: 'tool-call',
+        seq,
+        turn: data.turn,
+        step: data.step,
+        callId: data.callId,
+        name: data.name,
+        arguments: truncate(typeof data.arguments === 'string' ? data.arguments : ''),
+      }
     case 'tool/result':
       return {
         kind: 'tool-result',
         seq,
+        turn: data.turn,
+        step: data.step,
+        callId: data.message?.source?.callId ?? data.callId,
         text: truncate(textOf(data.message?.content)),
+        images: imagesOf(data.message?.content),
         error: data.error ? { name: data.error.name, code: data.error.code, reason: data.error.reason } : undefined,
+      }
+    case 'agent/inbox/spliced':
+      return {
+        kind: 'inbox',
+        seq,
+        target: typeof data.target === 'string' ? data.target : '',
+        start: typeof data.start === 'number' ? data.start : 0,
+        removedCount: typeof data.removedCount === 'number' ? data.removedCount : 0,
+        outcome: typeof data.outcome === 'string' ? data.outcome : undefined,
+        inserted: Array.isArray(data.inserted) ? data.inserted.map(inboxItem) : [],
       }
     case 'turn/start':
       return { kind: 'turn-start', seq, turn: data.turn }
     case 'turn/end':
-      return { kind: 'turn-end', seq, turn: data.turn, reason: data.reason?.kind }
+      return { kind: 'turn-end', seq, turn: data.turn, reason: turnReason(data.reason) }
     default:
       return { kind: 'event', seq, type: event?.type }
   }
@@ -1168,7 +1374,87 @@ function textOf(content) {
   return parts.join('')
 }
 
+/**
+ * 图片块 → 手机端要的元数据。只认已落库的附件引用（`agent/inbox/spliced` 与 user/message
+ * 里的图片在进信箱前就已经过 admission 换成引用），内联 base64 不进帧——几 MB 的 data
+ * 会让每一条记录都变成巨型帧，手机端自己也刚发过、本地渲染即可。
+ */
+function imagesOf(content) {
+  if (!Array.isArray(content)) return []
+  const out = []
+  for (const block of content) {
+    if (block === null || typeof block !== 'object' || block.type !== 'image') continue
+    const ref = block.attachment
+    if (ref === null || typeof ref !== 'object' || typeof ref.attachmentId !== 'string') continue
+    const image = {
+      attachmentId: ref.attachmentId,
+      mediaType: typeof ref.mediaType === 'string' ? ref.mediaType : 'image/png',
+      bytes: typeof ref.bytes === 'number' ? ref.bytes : 0,
+      width: typeof ref.width === 'number' ? ref.width : 0,
+      height: typeof ref.height === 'number' ? ref.height : 0,
+    }
+    if (typeof ref.name === 'string' && ref.name.length > 0) image.name = ref.name
+    out.push(image)
+  }
+  return out
+}
+
+/** 一条排队中的用户消息 → 手机端队列坞站的一行（文本 + 图片元数据 + 对账键）。 */
+function inboxItem(message) {
+  if (message === null || typeof message !== 'object') return { id: '', text: '', images: [] }
+  const source = message.source ?? {}
+  return {
+    id: typeof message.id === 'string' ? message.id : '',
+    source: typeof source.kind === 'string' ? source.kind : 'user',
+    rpcId: typeof source.rpcId === 'string' ? source.rpcId : undefined,
+    text: truncate(textOf(message.content), QUEUE_TEXT_CHARS),
+    images: imagesOf(message.content),
+  }
+}
+
 function truncate(value, limit = TRUNCATE_CHARS) {
   if (typeof value !== 'string') return value
   return value.length <= limit ? value : `${value.slice(0, limit)}…(+${value.length - limit} chars)`
+}
+
+/**
+ * 回合收尾原因：error 分支里带着 LlmFailure 的原文（额度用尽、上下文超限、空响应、鉴权失败
+ * 都在这），只留一个 kind 手机端就只能干看着「什么都没发生」。
+ */
+function turnReason(reason) {
+  if (!reason || typeof reason !== 'object') return undefined
+  const out = { kind: reason.kind }
+  if (reason.kind === 'error' && reason.error) {
+    out.code = reason.error.code
+    out.message = truncate(typeof reason.error.message === 'string' ? reason.error.message : '', 600)
+    if (typeof reason.error.status === 'number') out.status = reason.error.status
+  }
+  if (reason.kind === 'aborted') out.cause = reason.reason?.kind ?? reason.cause
+  return out
+}
+
+/** 思考块拼回一段文本：历史重放要用，否则刷新/重连后思考内容就没了。 */
+function reasoningOf(content) {
+  if (!Array.isArray(content)) return ''
+  const parts = []
+  for (const block of content) {
+    if (block && block.type === 'reasoning' && typeof block.text === 'string') parts.push(block.text)
+  }
+  return parts.join('')
+}
+
+/** assistant 消息里带的工具调用，客户端拿它重建工具行（null 表示这一帧没有）。 */
+function callsOf(content) {
+  if (!Array.isArray(content)) return []
+  const out = []
+  for (const block of content) {
+    if (block && block.type === 'tool-call') {
+      out.push({
+        callId: block.id,
+        name: block.name,
+        arguments: truncate(typeof block.arguments === 'string' ? block.arguments : ''),
+      })
+    }
+  }
+  return out
 }
