@@ -36,7 +36,7 @@ public class ChatView extends ScrollView {
         setVerticalScrollBarEnabled(false);
         setClipToPadding(false);
         setFillViewport(true);
-        setPadding(Ui.dp(c, Ui.PAD_H), Ui.dp(c, Ui.S2), Ui.dp(c, Ui.PAD_H), Ui.dp(c, 56));   // 底部留 ≥ 负 margin 的量：内容不会被输入卡压住
+        setPadding(Ui.dp(c, Ui.PAD_H), Ui.dp(c, Ui.S2), Ui.dp(c, Ui.PAD_H), Ui.dp(c, 14));   // 底部只留一点点，别在下方留空
         col = Ui.col(c);
         addView(col, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
