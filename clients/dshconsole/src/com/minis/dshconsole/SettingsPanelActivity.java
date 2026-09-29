@@ -77,6 +77,9 @@ public class SettingsPanelActivity extends Activity {
     }
 
     private void newWeb() {
+        if (offUi()) {
+            throw new IllegalStateException("newWeb 必须在主线程调用");
+        }
         web = new WebView(this);
         web.setBackgroundColor(Color.WHITE);
         WebSettings s = web.getSettings();
@@ -114,7 +117,20 @@ public class SettingsPanelActivity extends Activity {
         }
     }
 
+    /** 这几处都要创建 / 挂载 View，谁从别的线程喊都行：统一挪回主线程。 */
+    private boolean offUi() {
+        return android.os.Looper.myLooper() != android.os.Looper.getMainLooper();
+    }
+
     private void start() {
+        if (offUi()) {
+            ui.post(new Runnable() {
+                public void run() {
+                    start();
+                }
+            });
+            return;
+        }
         if (webUrl.length() > 0) {
             useWeb();
             return;
@@ -256,6 +272,14 @@ public class SettingsPanelActivity extends Activity {
     // —— 模式一：直接吃 DSH 原版网页 ——
 
     private void useWeb() {
+        if (offUi()) {
+            ui.post(new Runnable() {
+                public void run() {
+                    useWeb();
+                }
+            });
+            return;
+        }
         webMode = true;
         newWeb();
         web.setWebViewClient(new WebViewClient() {
@@ -370,6 +394,14 @@ public class SettingsPanelActivity extends Activity {
     // —— 模式二：app 自己渲染（host 给结构化 JSON） ——
 
     private void useStructured() {
+        if (offUi()) {
+            ui.post(new Runnable() {
+                public void run() {
+                    useStructured();
+                }
+            });
+            return;
+        }
         webMode = false;
         newWeb();
         web.setWebViewClient(new WebViewClient());
