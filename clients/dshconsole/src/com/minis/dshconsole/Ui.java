@@ -435,4 +435,26 @@ public class Ui {
         b.addView(child);
         return b;
     }
+
+
+    /** \u7ad6\u8f68\uff1a\u5728 x \u5904\u753b\u4e00\u6761 w \u5bbd\u7684\u7ec6\u7ebf\uff0c\u4e0a\u4e0b\u5404\u7559 inset\uff0c\u7ed9\u8f68\u8ff9\u65f6\u95f4\u7ebf\u5f53\u80cc\u666f\u3002 */
+    public static class Rail extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint p =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final int x, w, top, bot;
+        public Rail(int color, int xPx, int wPx, int topPx, int botPx) {
+            p.setColor(color);
+            p.setStyle(android.graphics.Paint.Style.FILL);
+            x = xPx; w = wPx; top = topPx; bot = botPx;
+        }
+        public void draw(android.graphics.Canvas c) {
+            android.graphics.Rect b = getBounds();
+            int y0 = b.top + top, y1 = b.bottom - bot;
+            if (y1 <= y0) return;
+            c.drawRect(b.left + x, y0, b.left + x + w, y1, p);
+        }
+        public void setAlpha(int a) { p.setAlpha(a); }
+        public void setColorFilter(android.graphics.ColorFilter cf) { p.setColorFilter(cf); }
+        public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+    }
 }
