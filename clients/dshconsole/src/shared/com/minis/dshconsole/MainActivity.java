@@ -188,7 +188,7 @@ public class MainActivity extends Activity {
     // ---------------- 抽屉 ----------------
 
     private void buildDrawer() {
-        final FrameLayout layer = new FrameLayout(this);
+        final FrameLayout layer = new DrawerLayer(this);      // 支持左滑关闭
         scrim = new View(this);
         scrim.setBackgroundColor(0xAA000000);
         scrim.setAlpha(0f);
@@ -215,6 +215,88 @@ public class MainActivity extends Activity {
 
     private View layer() {
         return root.findViewWithTag("layer");
+    }
+
+    /**
+     * 抽屉层：左滑关闭（跟手位移 + 松手判定）。
+     * 用 onInterceptTouchEvent 抢手势，这样抽屉里那些 ScrollView 竖着滚不受影响，
+     * 只有"明显横向、往左"的拖动才被我们接管。
+     */
+    private class DrawerLayer extends FrameLayout {
+        private float downX, downY;
+        private boolean dragging;
+        private android.view.VelocityTracker vt;
+        private final int slop;
+
+        DrawerLayer(android.content.Context c) {
+            super(c);
+            slop = Ui.dp(c, 10);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
+            if (!drawerOpen) return false;
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    downX = e.getX();
+                    downY = e.getY();
+                    dragging = false;
+                    if (vt != null) vt.recycle();
+                    vt = android.view.VelocityTracker.obtain();
+                    vt.addMovement(e);
+                    return false;
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    if (vt != null) vt.addMovement(e);
+                    float dx = e.getX() - downX;
+                    float dy = e.getY() - downY;
+                    if (!dragging && dx < -slop && Math.abs(dx) > Math.abs(dy) * 1.4f) {
+                        dragging = true;                    // 明显往左 → 接管
+                        side.animate().cancel();            // 别和入场动画打架
+                        scrim.animate().cancel();
+                        return true;
+                    }
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public boolean onTouchEvent(android.view.MotionEvent e) {
+            if (!drawerOpen) return false;
+            if (vt != null) vt.addMovement(e);
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    float t = Math.min(0f, e.getX() - downX);      // 只允许往左拉
+                    side.setTranslationX(t);
+                    scrim.setAlpha(Math.max(0f, 1f + t / Math.max(1, sideW)));
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL: {
+                    float t = Math.min(0f, e.getX() - downX);
+                    float vx = 0f;
+                    if (vt != null) {
+                        vt.computeCurrentVelocity(1000);
+                        vx = vt.getXVelocity();
+                    }
+                    boolean close = t < -sideW * 0.3f || vx < -900f;
+                    if (close) {
+                        closeDrawer();                             // 从当前位移继续滑出
+                    } else {
+                        side.animate().translationX(0).setDuration(160).start();
+                        scrim.animate().alpha(1f).setDuration(160).start();
+                    }
+                    if (vt != null) {
+                        vt.recycle();
+                        vt = null;
+                    }
+                    dragging = false;
+                    return true;
+                }
+            }
+            return super.onTouchEvent(e);
+        }
     }
 
     public void openDrawer() {
