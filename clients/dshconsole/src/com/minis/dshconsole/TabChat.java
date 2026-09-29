@@ -173,7 +173,7 @@ public class TabChat extends Tab {
         modeBar.setGravity(Gravity.CENTER_VERTICAL);
         int p = Ui.dp(act, 8);
         modeBar.setPadding(p, Ui.dp(act, 6), p, Ui.dp(act, 4));
-        modeBar.setBackgroundColor(Ui.PANEL);
+        modeBar.setBackgroundColor(0x00000000);      // 模式栏外框底色也去掉，直接融进输入卡片
         hs.addView(modeBar);
         rebuildChips();
         // 打开会话后 sessionId 才有效，稍后再同步一次真实状态
