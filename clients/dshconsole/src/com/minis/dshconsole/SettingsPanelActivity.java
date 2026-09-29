@@ -145,8 +145,7 @@ public class SettingsPanelActivity extends Activity {
                     }
                 } catch (Throwable t) {
                     // 本地模式最常见的就是"啥都没起"：把真实原因留下来，别让用户对着空卡片猜
-                    String m = t.getMessage();
-                    why = "连不上 " + (dev == null ? "" : dev.addr()) + "：" + (m == null ? "无响应" : m);
+                    why = shortWhy(t);
                 } finally {
                     if (live != null) {
                         try {
@@ -477,8 +476,7 @@ public class SettingsPanelActivity extends Activity {
         a.put("kind", "card");
         a.put("title", "怎么办");
         JSONArray rows = new JSONArray();
-        rows.put(row2("地址", (dev == null ? "" : dev.addr()) + (webNotice == null ? "" : " · " + webNotice),
-                btn("重试连接", "retry", "")));
+        rows.put(row2("地址", dev == null ? "" : dev.addr(), btn("重试连接", "retry", "")));
         if (local) {
             rows.put(row2("当前模式", "本地 harness", btn("切回远端", "mode", "remote")));
         }
@@ -573,6 +571,24 @@ public class SettingsPanelActivity extends Activity {
         if (t == null || t.length() == 0) return "—";
         if (t.length() <= 8) return "••••";
         return t.substring(0, 4) + "••••••••" + t.substring(t.length() - 4);
+    }
+
+    /** Java 的连接异常一长串，手机上留人也读不懂的那句就够了。 */
+    private String shortWhy(Throwable t) {
+        String m = t == null ? null : t.getMessage();
+        String addr = dev == null ? "" : dev.addr();
+        if (m == null || m.length() == 0) return "连不上 " + addr;
+        String l = m.toLowerCase();
+        if (l.contains("econnrefused") || l.contains("connection refused")) {
+            return "连不上 " + addr + "：连接被拒绝（这台机器上没人监听这个端口）";
+        }
+        if (l.contains("timeout") || l.contains("timed out")) {
+            return "连不上 " + addr + "：超时";
+        }
+        if (l.contains("route") || l.contains("unreachable")) {
+            return "连不上 " + addr + "：网络不可达";
+        }
+        return "连不上 " + addr + "：" + (m.length() > 90 ? m.substring(0, 90) + "…" : m);
     }
 
     private JSONObject row2(String k, String v, JSONObject btn) throws Exception {
