@@ -68,6 +68,11 @@ public class TabChat extends Tab {
                 rpcQuiet("approvals.decide", id, allow ? "allow" : "deny");
             }
         });
+        cv.setUserEditCb(new ChatView.UserEditCb() {
+            public void onEdit(final int forkSeq, final String text) {
+                editAndResend(forkSeq, text);
+            }
+        });
         cv.setQuestionCb(new ChatView.QuestionCb() {
             public void onAnswer(final String reqId, final String qid, final String option) {
                 try {
@@ -86,6 +91,79 @@ public class TabChat extends Tab {
             }
         });
     }
+
+    /**
+     * 编辑并重发：harness 里这条路的底层是 **fork**（从某个事件 seq 分叉出一个新会话，
+     * atSeq 是"含"该事件的切点），所以我们取这条消息**之前**那条记录的 seq 当切点，
+     * 分叉出新会话后再把改好的文本发进去 —— 原会话一个字都不动，可回退。
+     */
+    private void editAndResend(final int forkSeq, String old) {
+        final android.widget.EditText e = new android.widget.EditText(act);
+        e.setText(old == null ? "" : old);
+        e.setTextSize(14f);
+        e.setTextColor(Ui.TEXT);
+        e.setBackground(Ui.bg(Ui.SURF2, 10, act, Ui.STROKE, 1));
+        int pp = Ui.dp(act, 12);
+        e.setPadding(pp, pp, pp, pp);
+        android.widget.FrameLayout holder = new android.widget.FrameLayout(act);
+        int m = Ui.dp(act, 16);
+        holder.setPadding(m, Ui.dp(act, 8), m, 0);
+        holder.addView(e, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT));
+        new android.app.AlertDialog.Builder(act)
+                .setTitle("编辑并重发")
+                .setMessage("会从这条消息之前分叉出一个新对话（原对话保留）。")
+                .setView(holder)
+                .setPositiveButton("重发", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        final String text = e.getText().toString().trim();
+                        if (text.length() == 0) return;
+                        act.bg(new Runnable() {
+                            public void run() {
+                                Dsh c = null;
+                                try {
+                                    c = act.openDsh(9000);
+                                    JSONObject p = new JSONObject();
+                                    p.put("sessionId", sessionId);
+                                    if (forkSeq >= 0) p.put("seq", forkSeq);
+                                    JSONObject r = c.request("sessions.fork", p, 60000, null);
+                                    final String child = r.optString("sessionId", "");
+                                    if (child.length() == 0) throw new Exception("fork 没返回新会话");
+                                    logSend("fork → " + child);
+                                    act.ui(new Runnable() {
+                                        public void run() {
+                                            act.openChat(child, "编辑重发");
+                                            pendingSend = text;      // 会话加载完自动发出去
+                                        }
+                                    });
+                                } catch (final Exception ex) {
+                                    final String msg = String.valueOf(ex.getMessage());
+                                    act.ui(new Runnable() {
+                                        public void run() {
+                                            cv.note(msg.toLowerCase().contains("unknown method")
+                                                    ? "PC 侧插件还没有 sessions.fork，先更新插件"
+                                                    : "编辑重发失败：" + msg, Ui.RED);
+                                        }
+                                    });
+                                } finally {
+                                    if (c != null) {
+                                        try {
+                                            c.close();
+                                        } catch (Throwable ignored) {
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 分叉后要自动发出去的那条文本（会话加载完由 loadSession 消费）。 */
+    private volatile String pendingSend;
 
     /** 审批用的简版 RPC（一条短连接发完就走）。 */
     private void rpcQuiet(final String method, final String id, final String decision) {
@@ -1104,6 +1182,16 @@ public class TabChat extends Tab {
                     startStateWatch();
                     refreshInbox();                       // host 那边还排着的消息，坞里也得有
                     probeCapabilities();                  // 老插件要提前说一声，别等功能报错了才发现
+                    final String pending = pendingSend;
+                    pendingSend = null;
+                    if (pending != null && pending.length() > 0) {
+                        act.ui(new Runnable() {
+                            public void run() {
+                                input.setText(pending);
+                                send();                      // 走正常发送（进队列），复用整条链路
+                            }
+                        });
+                    }
                     statusBase = "已连接 · " + TabSessions.shortId(sessionId);
                     setStateStatus();
                 } catch (final Exception e) {
@@ -1191,6 +1279,16 @@ public class TabChat extends Tab {
             watchTries = 0;
             act.ui(new Runnable() {
                 public void run() {
+                    final String pending = pendingSend;
+                    pendingSend = null;
+                    if (pending != null && pending.length() > 0) {
+                        act.ui(new Runnable() {
+                            public void run() {
+                                input.setText(pending);
+                                send();                      // 走正常发送（进队列），复用整条链路
+                            }
+                        });
+                    }
                     statusBase = "已连接 · " + TabSessions.shortId(sessionId);
                     setStatus("连接已恢复", Ui.GREEN);
                 }
@@ -1716,8 +1814,12 @@ public class TabChat extends Tab {
         }
     }
 
+    /** 上一条记录的 seq：给"编辑并重发"算分叉点用。 */
+    private int lastRecordSeq = -1;
+
     private void renderRecord(JSONObject r) {
         String kind = r.optString("kind", r.optString("type", "?"));
+        int seq = r.optInt("seq", -1);
         if ("user".equals(kind)) {
             String txt = r.optString("text", "");
             logRaw("user", txt);
@@ -1727,7 +1829,10 @@ public class TabChat extends Tab {
             // 发出去的原文见过 → 用户气泡；否则按注入上下文折叠展示。
             boolean steer = r.optBoolean("steering", false);
             if (!isMine(txt) && looksInjected(txt)) cv.inject(DshConsole.clamp(txt, 60000));
-            else if (txt.length() > 0) cv.user(DshConsole.clamp(txt, 4000), steer);
+            else if (txt.length() > 0) {
+                // forkSeq 取"上一条记录"的 seq：分叉是**含**切点的，取前一条正好把这条排除出去
+                cv.user(DshConsole.clamp(txt, 4000), steer, lastRecordSeq);
+            }
             if (!imgs.isEmpty()) cv.images(imgs, true);      // 历史里的图：先画占位，真要显示再去 host 取
         } else if ("inbox".equals(kind)) {
             applyQueueSplice(r.optJSONArray("inserted")); // 队列变了：重新跟 host 对一次账
@@ -1766,9 +1871,11 @@ public class TabChat extends Tab {
             cv.note("▷ 回合 " + r.optLong("turn", 0), Ui.DIM);
         } else if ("turn-end".equals(kind)) {
             String reason = r.optString("reason", "");
+            // 记录 seq：下面统一更新（末尾）
             cv.note("— 回合结束" + (reason.length() > 0 ? " · " + reason : ""), Ui.DIM);
             cv.snapToBottom();                     // 收尾再钉一次真正的底部
         }
+        if (seq >= 0) lastRecordSeq = seq;         // 给下一条用户消息算分叉点
     }
 
     // ---------------- 发送 / 打断 / 历史 ----------------

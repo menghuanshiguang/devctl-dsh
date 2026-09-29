@@ -594,6 +594,26 @@ async function dispatch(bridge, connection, method, params) {
       return controller.cancel({ sessionId: params.sessionId })
 
     /**
+     * 从一个节点分叉出新会话 —— harness 的"编辑并重发"底层就是它
+     * （`SessionForkRequest { sessionId, atSeq? }`，atSeq 是**含**该事件的切点；
+     *  省略则取最后一个已完成回合的前缀）。
+     */
+    case 'sessions.fork': {
+      requireSessionId(params)
+      if (typeof controller.fork !== 'function') {
+        throw new BridgeError('unavailable', '这个 Host 的 sessionController 不支持 fork')
+      }
+      const at = Number.isInteger(params.seq) && params.seq >= 0 ? params.seq : undefined
+      const value = await controller.fork({
+        sessionId: params.sessionId,
+        ...(at === undefined ? {} : { atSeq: at }),
+      })
+      const child = typeof value?.sessionId === 'string' ? value.sessionId : ''
+      if (child.length === 0) throw new BridgeError('unavailable', 'fork 没有返回新会话 id')
+      return { sessionId: child, fromSeq: at ?? null }
+    }
+
+    /**
      * 归档对话 = DSH 自己的"从列表里删掉"（可恢复）。
      * harness 没有硬删除会话的口子，官方语义就是 workspaceRegistry.archiveSession。
      */

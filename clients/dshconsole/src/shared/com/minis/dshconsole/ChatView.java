@@ -50,6 +50,15 @@ public class ChatView extends ScrollView {
 
     /** 用户气泡；steering（插话）时加一个小标记，跟普通消息区分开。 */
     public void user(String text, boolean steering) {
+        user(text, steering, -1, -1);
+    }
+
+    /** forkSeq = 这条消息"之前"那个节点的 seq（编辑重发要从那儿分叉）。 */
+    public void user(final String text, boolean steering, final int forkSeq) {
+        user(text, steering, forkSeq, -1);
+    }
+
+    public void user(final String text, boolean steering, final int forkSeq, final int keep) {
         dropEmpty();
         hasContent = true;
         spacer(Ui.S3);
@@ -70,9 +79,28 @@ public class ChatView extends ScrollView {
         TextView t = plainBody(text == null ? "" : text, Ui.TEXT);
         t.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.84f));
         b.addView(t);
+        if (forkSeq >= 0 && userEditCb != null) {                 // 长按 = 编辑并重发
+            b.setOnLongClickListener(new View.OnLongClickListener() {
+                public boolean onLongClick(View v) {
+                    userEditCb.onEdit(forkSeq, text == null ? "" : text);
+                    return true;
+                }
+            });
+        }
         endRow(b);
         col.addView(copyBar(new String[]{text == null ? "" : text}), fullLp());
         scroll(true);
+    }
+
+    /** 长按用户气泡：编辑并重发。 */
+    public interface UserEditCb {
+        void onEdit(int forkSeq, String text);
+    }
+
+    private UserEditCb userEditCb;
+
+    public void setUserEditCb(UserEditCb cb) {
+        userEditCb = cb;
     }
 
     /** 消息右下角的小复制按钮。src 是可变引用，流式期间内容会持续增长。 */
