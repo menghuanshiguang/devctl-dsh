@@ -32,6 +32,8 @@ public class SettingsActivity extends Activity {
     private Handler ui;
     private Store store;
     private Store.Dev dev;
+    /** 当前生效的设备：本地模式=回环那台，远端模式=选中的那台。一级页所有读取都走它。 */
+    private Store.Dev active;
     private boolean fromHost = false;
 
     protected void onCreate(Bundle b) {
@@ -42,6 +44,8 @@ public class SettingsActivity extends Activity {
         String name = store.def("dsh");
         dev = store.find("dsh", name);
         if (dev == null) dev = new Store.Dev();
+        active = MainActivity.activeDevOf(store, name);
+        if (active == null) active = dev;
         setTitle("设置");
         setContentView(scaffold());
         showBuiltin();
@@ -59,8 +63,8 @@ public class SettingsActivity extends Activity {
         col.setPadding(Ui.dp(this, Ui.PAD_H), Ui.dp(this, 8), Ui.dp(this, Ui.PAD_H), 0);
 
         col.addView(Ui.tv(this, "设置", Ui.H1, Ui.TEXT));
-        String sub = dev.name.length() == 0 ? "未配对设备" : ("设备 · " + dev.addr());
-        col.addView(Ui.tv(this, sub, Ui.FS_SMALL, Ui.MUT));
+        subTitle = Ui.tv(this, deviceLine(), Ui.FS_SMALL, Ui.MUT);
+        col.addView(subTitle);
         col.addView(Ui.gap(this, 10));
 
         ScrollView sc = new ScrollView(this);
@@ -107,6 +111,8 @@ public class SettingsActivity extends Activity {
     // ==================== 运行模式：远端（局域网 PC）/ 本地（这台手机上的 harness） ====================
 
     private LinearLayout modeCard;
+    /** 顶部「设备 · xx / 本地 harness · xx」那行。 */
+    private TextView subTitle;
 
     /** 两枚胶囊 + 一行说明：远端 走局域网那台；本地 走本机回环，协议一模一样。 */
     private View modeCard() {
@@ -127,13 +133,13 @@ public class SettingsActivity extends Activity {
         head.addView(chip("远端", !local, new Runnable() {
             public void run() {
                 store.set("runMode", MainActivity.MODE_REMOTE);
-                rebuildModeCard();
+                onModeChanged();
             }
         }));
         head.addView(chip("本地", local, new Runnable() {
             public void run() {
                 store.set("runMode", MainActivity.MODE_LOCAL);
-                rebuildModeCard();
+                onModeChanged();
             }
         }));
         modeCard.addView(head);
@@ -142,7 +148,8 @@ public class SettingsActivity extends Activity {
         String port = store.get("local:port", "7788");
         String tok = store.get("local:token", "");
         String line = local
-                ? "本地 · " + host + ":" + port + (tok.length() > 0 ? " · 已配令牌" : " · 还没配令牌")
+                ? "本地 · " + host + ":" + port
+                        + (tok.length() > 0 ? " · 已配令牌" : " · 免令牌（同一台机器，回环免鉴权）")
                 : "远端 · " + (dev == null || dev.addr().length() == 0 ? "未配对" : dev.addr());
         modeCard.addView(Ui.tv(this, line, 12f, local ? Ui.AMBER : Ui.MUT));
         if (local) {
@@ -155,6 +162,21 @@ public class SettingsActivity extends Activity {
             });
             modeCard.addView(cfg);
         }
+    }
+
+    /** 模式一换：重新解析生效设备、刷新顶部那行、重新问分区表（本地/远端可能列的不一样）。 */
+    private void onModeChanged() {
+        active = MainActivity.activeDevOf(store, store.def("dsh"));
+        if (active == null) active = dev;
+        rebuildModeCard();
+        if (subTitle != null) subTitle.setText(deviceLine());
+        loadSections();
+    }
+
+    /** 顶部那行小字：本地模式写「本地 harness · 127.0.0.1:7788」，远端写选中那台。 */
+    private String deviceLine() {
+        if (active == null || active.addr().length() == 0) return "未配对设备";
+        return (MainActivity.isLocal(store) ? "本地 harness · " : "设备 · ") + active.addr();
     }
 
     private TextView chip(String text, boolean on, final Runnable cb) {
@@ -181,11 +203,12 @@ public class SettingsActivity extends Activity {
         box.setPadding(p, Ui.dp(this, 8), p, 0);
         final android.widget.EditText h = field(store.get("local:host", "127.0.0.1"), "地址");
         final android.widget.EditText pt = field(store.get("local:port", "7788"), "端口");
-        final android.widget.EditText tk = field(store.get("local:token", ""), "令牌");
+        final android.widget.EditText tk = field(store.get("local:token", ""), "令牌（本地模式一般不用填）");
         box.addView(h);
         box.addView(pt);
         box.addView(tk);
-        box.addView(Ui.tv(this, "令牌在本地 harness 的 $DSH_HOME/devctl-dsh.json 里", 11.5f, Ui.MUT));
+        box.addView(Ui.tv(this, "本地 harness 用 local/cordis.local.patch.yml 启动时只绑回环、免令牌；"
+                + "要接局域网那台才需要填 $DSH_HOME/devctl-dsh.json 里的令牌", 11.5f, Ui.MUT));
         new android.app.AlertDialog.Builder(this)
                 .setTitle("本地 harness")
                 .setView(box)
@@ -224,8 +247,8 @@ public class SettingsActivity extends Activity {
     /** 一行分区下面的说明：能拿实时值就给实时值，别让用户点进去才知道自己连的是哪台。 */
     private String hint(String id) {
         if ("devctl".equals(id)) {
-            String a = dev == null ? "" : dev.addr();
-            String w = dev == null ? "" : store.get("web:" + dev.name, "");
+            String a = active == null ? "" : active.addr();
+            String w = active == null ? "" : store.get("web:" + active.name, "");
             if (a.length() > 0) return w.length() > 0 ? a + " · 原版网页可用" : a;
             return "配对地址、令牌、二维码";
         }
@@ -255,7 +278,7 @@ public class SettingsActivity extends Activity {
 
     /** 分区表问 host（settings.sections）；host 没实现就保持内置表。 */
     private void loadSections() {
-        if (dev == null || dev.host.length() == 0) return;
+        if (active == null || active.host.length() == 0) return;
         new Thread(new Runnable() {
             public void run() {
                 final java.util.ArrayList<String> ids = new java.util.ArrayList<String>();
@@ -325,7 +348,7 @@ public class SettingsActivity extends Activity {
     }
 
     private String key() {
-        return "web:" + (dev == null ? "" : dev.name);
+        return "web:" + (active == null ? "" : active.name);
     }
 
     private String webUrl() {
@@ -368,7 +391,7 @@ public class SettingsActivity extends Activity {
 
     /** 一次性连接：发一条请求就关掉（设置页不需要常连）。 */
     private JSONObject call(String method, JSONObject params) throws Exception {
-        Dsh d = Dsh.open(dev, 6000, "DshConsole-settings", "android");
+        Dsh d = Dsh.open(active, 6000, "DshConsole-settings", "android");
         try {
             return d.request(method, params, 8000, new Dsh.EvtSink() {
                 public void onEvt(String evt, JSONObject data) {
