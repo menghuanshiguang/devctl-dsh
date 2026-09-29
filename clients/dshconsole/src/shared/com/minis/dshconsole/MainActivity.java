@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
         }
         installInsets();            // 系统栏内边距 + IME 高度转给聊天页
         store = new Store(this);
+        handlePairIntent(getIntent());          // 扫码/分享进来的配对信息
         // 本地版：环境没装好/没跑起来，先把启用引导摆出来（远端版 hasRuntime() 为 false，永不进这里）
         final LocalEnv env = Cores.get().runtime();
         if (env != null && !(env.ready(this) && env.running(this))) {
@@ -175,6 +176,66 @@ public class MainActivity extends Activity {
             }
         });
         decor.requestApplyInsets();
+    }
+
+    @Override
+    protected void onNewIntent(android.content.Intent it) {
+        super.onNewIntent(it);
+        setIntent(it);
+        handlePairIntent(it);                   // app 已在前台时来一单分享/深链
+    }
+
+    /**
+     * 扫码配对：系统相机（或任何 app）扫到配对二维码后，
+     *   - 「分享」文本 → ACTION_SEND + text/plain
+     *   - 或点 dshconsole://pair?host=…&port=…&token=… 深链
+     * 都由这里接住：填进设备，然后直接连。
+     */
+    private void handlePairIntent(android.content.Intent it) {
+        if (it == null) return;
+        try {
+            String text = null;
+            if (android.content.Intent.ACTION_SEND.equals(it.getAction())) {
+                text = it.getStringExtra(android.content.Intent.EXTRA_TEXT);
+            } else if (android.content.Intent.ACTION_VIEW.equals(it.getAction()) && it.getData() != null) {
+                android.net.Uri u = it.getData();
+                if (u != null && "dshconsole".equals(u.getScheme())) {
+                    Store.Dev d = new Store.Dev();
+                    d.name = "home";
+                    d.host = u.getQueryParameter("host") == null ? "" : u.getQueryParameter("host");
+                    try {
+                        d.port = Integer.parseInt(String.valueOf(u.getQueryParameter("port")));
+                    } catch (Throwable ignored) {
+                        d.port = 7788;
+                    }
+                    d.token = u.getQueryParameter("token") == null ? "" : u.getQueryParameter("token");
+                    if (d.host.length() > 0) {
+                        store.putDevice("dsh", d);
+                        store.setDef("dsh", d.name);
+                        dshName = d.name;
+                        android.util.Log.i("DshPair", "深链配对: " + d.host + ":" + d.port);
+                        toast("已从二维码配对 · " + d.addr());
+                        connectDsh(true);
+                    }
+                    return;
+                }
+            }
+            if (text == null || text.trim().length() == 0) return;
+            Store.Dev d = store.find("dsh", dshName);
+            if (d == null) {
+                d = new Store.Dev();
+                d.name = "home";
+            }
+            android.util.Log.i("DshPair", "分享进来的配对文本: " + text.trim());
+            applyPairCmd(text.trim(), d);        // 复用"粘贴配对命令"那套解析
+            store.putDevice("dsh", d);           // 解析出来要落盘，不然只是改了内存里的副本
+            store.setDef("dsh", d.name);
+            dshName = d.name;
+            toast("已配对 · " + d.addr());
+            connectDsh(true);
+        } catch (Throwable e) {
+            android.util.Log.i("DshPair", "配对失败: " + e);
+        }
     }
 
     // ---------------- 顶栏 ----------------
