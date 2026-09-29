@@ -134,14 +134,19 @@ public class SettingsPanelActivity extends Activity {
                 try {
                     live = Dsh.open(dev, 5000, "DshConsole-settings", "android");
                     JSONObject w = live.hello == null ? null : live.hello.optJSONObject("web");
-                    if (w != null) {
+                    if (w == null) {
+                        why = "host 没报网页窗口（插件版本偏旧）";
+                    } else {
                         int p = w.optInt("port", 0);
                         String url = w.optString("url", "");
                         if (w.optBoolean("ready", false) && url.length() > 0) base = url;
                         else if (w.optBoolean("ready", false) && p > 0) base = "http://" + dev.host + ":" + p + "/?token=" + dev.token;
                         else why = webReason(w.optString("reason", "")) + webTrace(w);
                     }
-                } catch (Throwable ignored) {
+                } catch (Throwable t) {
+                    // 本地模式最常见的就是"啥都没起"：把真实原因留下来，别让用户对着空卡片猜
+                    String m = t.getMessage();
+                    why = "连不上 " + (dev == null ? "" : dev.addr()) + "：" + (m == null ? "无响应" : m);
                 } finally {
                     if (live != null) {
                         try {
@@ -167,6 +172,10 @@ public class SettingsPanelActivity extends Activity {
                     ui.post(new Runnable() {
                         public void run() {
                             webUrl = found.indexOf("token=") >= 0 ? found : found + "/?token=" + dev.token;
+                            try {
+                                store.set("web:" + dev.name, webUrl);   // 学会就存：本地/远端各存一份
+                            } catch (Throwable ignored) {
+                            }
                             if (!webMode || web == null) useWeb();
                         }
                     });
@@ -450,14 +459,32 @@ public class SettingsPanelActivity extends Activity {
     /** 本地兜底：devctl 分区用 app 自己的配对记录 + 一次握手探测。 */
     private JSONObject localPanel(String sid) throws Exception {
         if ("devctl".equals(sid)) return devctlPanel();
+        boolean local = MainActivity.isLocal(store);
         JSONObject o = new JSONObject();
         o.put("title", sid);
+        o.put("subtitle", (local ? "本地 harness · " : "远端 · ") + (dev == null ? "" : dev.addr()));
         JSONArray bs = new JSONArray();
+
         JSONObject c = new JSONObject();
         c.put("kind", "card");
-        c.put("text", "这一分区由 DSH 主程序提供。");
-        c.put("note", "host 那侧开了网页窗口就会自动换成 DSH 自己的页面；也可以在上一页手填网页地址。");
+        c.put("text", "这一分区的内容由 DSH 自己的网页界面提供。");
+        c.put("note", local
+                ? "本地模式要先把 harness 跑在这台手机上（local/start-local.sh），起来后这里会自动换成它的网页。"
+                : "host 那侧开了网页窗口就会自动换成 DSH 自己的页面。");
         bs.put(c);
+
+        JSONObject a = new JSONObject();
+        a.put("kind", "card");
+        a.put("title", "怎么办");
+        JSONArray rows = new JSONArray();
+        rows.put(row2("地址", (dev == null ? "" : dev.addr()) + (webNotice == null ? "" : " · " + webNotice),
+                btn("重试连接", "retry", "")));
+        if (local) {
+            rows.put(row2("当前模式", "本地 harness", btn("切回远端", "mode", "remote")));
+        }
+        a.put("rows", rows);
+        bs.put(a);
+
         o.put("blocks", bs);
         return o;
     }
@@ -548,7 +575,40 @@ public class SettingsPanelActivity extends Activity {
         return t.substring(0, 4) + "••••••••" + t.substring(t.length() - 4);
     }
 
+    private JSONObject row2(String k, String v, JSONObject btn) throws Exception {
+        JSONObject r = new JSONObject();
+        r.put("k", k);
+        r.put("v", v);
+        if (btn != null) {
+            JSONArray bs = new JSONArray();
+            bs.put(btn);
+            r.put("btns", bs);
+        }
+        return r;
+    }
+
     private void doAct(final String sid, final String action, final String arg) {
+        if ("retry".equals(action)) {                 // 重新问一次网页窗口
+            webNotice = null;
+            webUrl = "";
+            start();
+            return;
+        }
+        if ("mode".equals(action)) {                  // 一键切回远端，然后照着新设备重开这一页
+            store.set("runMode", "remote".equals(arg) ? MainActivity.MODE_REMOTE : MainActivity.MODE_LOCAL);
+            webNotice = null;
+            webUrl = "";
+            String nm = store.def("dsh");
+            dev = MainActivity.activeDevOf(store, nm);
+            if (dev == null) dev = new Store.Dev();
+            try {
+                webUrl = store.get("web:" + dev.name, "");
+            } catch (Throwable ignored) {
+            }
+            Toast.makeText(this, "已切到" + ("remote".equals(arg) ? "远端" : "本地") + "模式", Toast.LENGTH_SHORT).show();
+            start();
+            return;
+        }
         if ("reveal-token".equals(action) || "hide-token".equals(action)) {
             revealToken = "reveal-token".equals(action);
             request(sid);
