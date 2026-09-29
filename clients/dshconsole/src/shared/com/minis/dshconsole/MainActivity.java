@@ -267,25 +267,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 长按主题按钮：三档一起给（跟随系统 / 深色 / 浅色）。 */
+    /** 长按侧栏那个主题按钮：出三档弹层（照参考图的样子）。 */
     public void openThemePicker() {
-        final String[] keys = {"system", "dark", "light"};
-        String[] labels = {"跟随系统", "深色", "浅色"};
-        new AlertDialog.Builder(this)
-                .setTitle("外观")
-                .setItems(labels, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        store.set("theme", keys[w]);
-                        Ui.themeDirty = false;
-                        reopenDrawerAfterRecreate = drawerOpen;
-                        recreate();
-                        try {
-                            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                })
-                .show();
+        ThemePicker.show(this);
     }
 
     // ---------------- 抽屉 ----------------

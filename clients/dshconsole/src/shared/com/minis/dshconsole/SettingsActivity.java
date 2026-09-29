@@ -251,19 +251,7 @@ public class SettingsActivity extends Activity {
         Ui.press(r, this, Ui.SURF3, 0);
         r.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v2) {
-                final String[] keys = {"system", "dark", "light"};
-                String[] labels = {"跟随系统", "深色", "浅色"};
-                new AlertDialog.Builder(SettingsActivity.this)
-                        .setTitle("外观")
-                        .setItems(labels, new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface d, int w) {
-                                new Store(SettingsActivity.this).set("theme", keys[w]);
-                                Ui.themeDirty = true;
-                                recreate();
-                            }
-                        })
-                        .setNegativeButton("取消", null)
-                        .show();
+                ThemePicker.show(SettingsActivity.this);
             }
         });
         return r;
