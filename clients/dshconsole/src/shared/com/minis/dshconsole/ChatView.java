@@ -1602,6 +1602,7 @@ public class ChatView extends ScrollView {
 
     private TextView plainBody(String s, int color) {
         TextView t = Ui.tv(ctx, s == null ? "" : s, Ui.FS_BODY, color);
+        t.setLineSpacing(Ui.dp(ctx, 3), 1.06f);        // 中文长段落密排太累，给一点呼吸
         t.setText(md(s));
         t.setLineSpacing(0, 1.25f);                    // Minis 正文 16sp / 行高≈19-20sp（1.25 倍）
         if (hasLink(s)) {
@@ -1789,8 +1790,11 @@ public class ChatView extends ScrollView {
             } else if ("~~".equals(mark)) {
                 out.setSpan(new android.text.style.StrikethroughSpan(), st, out.length(), 0);
             } else {
+                // 照 harness 的 inline code：只是"等宽 + 略小 + 淡底"的小片，
+                // 颜色跟正文一致 —— 以前染成琥珀色，满屏花花绿绿，读起来特别累。
                 out.setSpan(new android.text.style.TypefaceSpan("monospace"), st, out.length(), 0);
-                out.setSpan(new android.text.style.ForegroundColorSpan(Ui.AMBER), st, out.length(), 0);
+                out.setSpan(new android.text.style.RelativeSizeSpan(0.92f), st, out.length(), 0);
+                out.setSpan(new android.text.style.BackgroundColorSpan(Ui.ICODE_BG), st, out.length(), 0);
                 // 行内代码里装的就是个链接（harness 也这么干）→ 顺手让它能点
                 String inner = out.subSequence(st, out.length()).toString().trim();
                 if (isWebUrl(inner)) {
@@ -1869,7 +1873,7 @@ public class ChatView extends ScrollView {
     private void fileLink(android.text.SpannableStringBuilder out, int st, int en, final String path) {
         if (en <= st) return;
         out.setSpan(new android.text.style.TypefaceSpan("monospace"), st, en, 0);
-        out.setSpan(new android.text.style.ForegroundColorSpan(Ui.TEXT), st, en, 0);
+        out.setSpan(new android.text.style.RelativeSizeSpan(0.94f), st, en, 0);
         out.setSpan(new android.text.style.ClickableSpan() {
             @Override
             public void onClick(View v) {
