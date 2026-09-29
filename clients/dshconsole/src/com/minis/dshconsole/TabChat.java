@@ -138,8 +138,7 @@ public class TabChat extends Tab {
 
         LinearLayout card = new LinearLayout(act);   // DeepSeek 式：整块独立圆角卡片
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.bg(Ui.CARD, 22, act));     // 不描边，靠一点点阴影浮起来
-        card.setElevation(Ui.dp(act, 6));
+        card.setBackground(Ui.bg(Ui.CARD, 22, act));     // 卡面本身不描边
         int cp = Ui.dp(act, 6);
         card.setPadding(cp, cp, cp, cp);
         card.addView(bar, new LinearLayout.LayoutParams(
@@ -150,9 +149,11 @@ public class TabChat extends Tab {
         mlp2.topMargin = Ui.dp(act, 2);
         card.addView(modeRow, mlp2);                 // 三颗挪到输入框下面
 
-        LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，浮在背景上
+        LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，同时当阴影的呼吸位
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setPadding(Ui.dp(act, 10), Ui.dp(act, 6), Ui.dp(act, 10), Ui.dp(act, 10));
+        outer.setPadding(Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10));
+        outer.setBackground(new Ui.ShadowBg(act, 22, 8, 3, 0x24000000, Ui.CARD));   // 一点点软阴影
+        outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
         box.addView(outer);
         return box;
