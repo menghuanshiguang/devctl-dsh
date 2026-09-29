@@ -7,6 +7,9 @@
 
   var STYLE_ID = 'ds-settings-page-style';
   var state = { label: LABEL, id: SECTION_ID, index: SECTION_INDEX, active: null, clicks: 0, done: false, hit: '' };
+  /** 点中之后继续盯着：DSH 的分区是 SPA 内部状态，数据一加载完常常自己弹回默认分区。 */
+  var ASSERT_MS = 7000;
+  var MAX_CLICKS = 10;
 
   /** 归一化：去掉空格和常见标点、压成小写 —— 「Agent 预设」和「agent预设」要算同一个。 */
   function norm(t) {
@@ -163,9 +166,8 @@
   }
 
   function select() {
-    var overlay, wants, w, cells, exact = null, loose = null, i, t, target, names = [], via = '';
+    var overlay, wants, w, cells, exact = null, loose = null, i, t, target, names = [], via = '', onTarget = false;
     if (!state.label && !state.id) return true;
-    if (state.done) return true;
     overlay = findOverlay();
     if (!overlay) return false;
     wants = candidates();
@@ -191,7 +193,26 @@
     var cur = headerTitle(overlay);
     if (cur !== state.curTitle) { state.curTitle = cur; log('header=' + cur); }
     for (w = 0; w < wants.length; w++) {
-      if (showsSection(overlay, wants[w])) { state.done = true; state.hit = cur; log('done ' + wants[w]); return true; }
+      if (showsSection(overlay, wants[w])) { onTarget = true; break; }
+    }
+    if (onTarget) {
+      if (!state.done) {
+        state.done = true;
+        state.hit = cur;
+        state.until = Date.now() + ASSERT_MS;
+        log('done ' + wants.join('/'));
+      }
+      return true;
+    }
+    if (state.done) {
+      // 已经跳到过目标分区，但现在又被弹回去了
+      if (Date.now() > (state.until || 0)) {
+        if (!state.driftLogged) { state.driftLogged = true; log('drift-final cur=' + cur); }
+        return true;
+      }
+      state.done = false;
+      state.clicks = Math.max(0, state.clicks - 1);    // 这次是纠偏，不算在误点里
+      log('drift → re-assert (cur=' + cur + ')');
     }
     target = exact || loose;
     if (!target && state.index >= 0 && state.index < cells.length) {
@@ -199,8 +220,13 @@
       via = 'index:' + state.index;
     }
     if (!target) { log('no cell for ' + wants.join('/')); return false; }
-    if (isActive(target)) { state.done = true; log('already active ' + want); return true; }
-    if (state.clicks >= 3) { state.done = true; log('give up ' + want + ' cur=' + cur); return true; }
+    if (isActive(target)) {
+      state.done = true;
+      state.until = Date.now() + ASSERT_MS;
+      log('already active ' + wants.join('/'));
+      return true;
+    }
+    if (state.clicks >= MAX_CLICKS) { state.done = true; state.until = Date.now(); log('give up cur=' + cur); return true; }
     if (Date.now() - (state.lastClick || 0) < 700) return true;
     state.lastClick = Date.now();
     state.clicks += 1;
@@ -265,6 +291,8 @@
       state.done = false;
       state.logged = false;
       state.hit = '';
+      state.until = 0;
+      state.driftLogged = false;
       run();
     },
     /** 现在停在哪个分区（给外面做「没跳过去」的提示用）。 */

@@ -292,7 +292,7 @@ public class SettingsPanelActivity extends Activity {
                     }
                 });
             }
-        }, 2800);
+        }, 7600);              // 等注入脚本那段 7 秒纠偏窗口结束，再看它到底停在哪
     }
 
     private static String unquote(String v) {
