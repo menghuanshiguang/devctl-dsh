@@ -54,7 +54,7 @@ public class SettingsPanelActivity extends Activity {
         ui = new Handler(Looper.getMainLooper());
         store = new Store(this);
         String nm = store.def("dsh");
-        dev = Core.device(store, nm);      // 模式在本地就指回环，远端就指选中那台
+        dev = Cores.get().device(store, nm);      // 模式在本地就指回环，远端就指选中那台
         if (dev == null) dev = store.find("dsh", nm);
         if (dev == null) dev = new Store.Dev();
         if (getIntent() != null) {
@@ -69,7 +69,7 @@ public class SettingsPanelActivity extends Activity {
         } catch (Throwable ignored) {
         }
         setTitle(label);
-        if (Core.local() && dev.name.length() == 0) dev.name = "local";
+        if (Cores.get().local() && dev.name.length() == 0) dev.name = "local";
         root = new FrameLayout(this);
         root.setBackgroundColor(Ui.BG);
         setContentView(root);
@@ -490,7 +490,7 @@ public class SettingsPanelActivity extends Activity {
     /** 本地兜底：devctl 分区用 app 自己的配对记录 + 一次握手探测。 */
     private JSONObject localPanel(String sid) throws Exception {
         if ("devctl".equals(sid)) return devctlPanel();
-        boolean local = Core.local();
+        boolean local = Cores.get().local();
         JSONObject o = new JSONObject();
         o.put("title", sid);
         o.put("subtitle", (local ? "本地 harness · " : "远端 · ") + (dev == null ? "" : dev.addr()));

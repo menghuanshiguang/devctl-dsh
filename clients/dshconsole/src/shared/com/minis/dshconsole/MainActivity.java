@@ -467,7 +467,7 @@ public class MainActivity extends Activity {
 
     /** 开一条独立连接（长驻事件流用，避免和 request/response 抢读）。 */
     public Dsh openDsh(int timeoutMs) throws Exception {
-        Store.Dev dev = Core.device(store, dshName);
+        Store.Dev dev = Cores.get().device(store, dshName);
         if (dev == null) throw new Exception("未配置 DSH 设备");
         return Dsh.open(dev, timeoutMs, "dshconsole/1.0", "Android " + Build.VERSION.RELEASE);
     }

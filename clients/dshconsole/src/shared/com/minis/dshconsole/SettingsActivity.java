@@ -46,7 +46,7 @@ public class SettingsActivity extends Activity {
         String name = store.def("dsh");
         dev = store.find("dsh", name);
         if (dev == null) dev = new Store.Dev();
-        active = Core.device(store, name);
+        active = Cores.get().device(store, name);
         if (active == null) active = dev;
         setTitle("设置");
         setContentView(scaffold());
@@ -72,7 +72,7 @@ public class SettingsActivity extends Activity {
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
         list = Ui.col(this);
-        if (Core.local()) {                // 本地版才有的卡片，远端版这行不显示
+        if (Cores.get().local()) {                // 本地版才有的卡片，远端版这行不显示
             list.addView(localCard());
             list.addView(Ui.gap(this, 10));
         }
@@ -115,7 +115,7 @@ public class SettingsActivity extends Activity {
     /** 顶部那行小字：远端版写「设备 · 192.168.x.x:7788」，本地版写「本地 harness · 127.0.0.1:7788」。 */
     private String deviceLine() {
         if (active == null || active.addr().length() == 0) return "未配对设备";
-        return (Core.local() ? "本地 harness · " : "设备 · ") + active.addr();
+        return (Cores.get().local() ? "本地 harness · " : "设备 · ") + active.addr();
     }
 
     /**
@@ -125,7 +125,8 @@ public class SettingsActivity extends Activity {
     private View localCard() {
         LinearLayout card = Ui.col(this);
         card.addView(Ui.tv(this, "本地环境", 15.5f, Ui.TEXT));
-        card.addView(Ui.tv(this, LocalRuntime.state(this), 12f, Ui.MUT));
+        final LocalEnv env = Cores.get().runtime();
+        card.addView(Ui.tv(this, env == null ? "" : env.state(this), 12f, Ui.MUT));
         LinearLayout row = Ui.row(this);
         TextView check = Ui.tv(this, "环境自检", 12.5f, Ui.ACCENT);
         check.setPadding(0, Ui.dp(this, 6), Ui.dp(this, 14), 0);
@@ -133,7 +134,7 @@ public class SettingsActivity extends Activity {
             public void onClick(View v) {
                 final TextView out = Ui.tv(SettingsActivity.this, "", 11.5f, Ui.DIM);
                 out.setTypeface(android.graphics.Typeface.MONOSPACE);
-                Toast.makeText(SettingsActivity.this, LocalRuntime.selfCheck(SettingsActivity.this),
+                Toast.makeText(SettingsActivity.this, env == null ? "" : env.selfCheck(SettingsActivity.this),
                         Toast.LENGTH_LONG).show();
             }
         });
@@ -169,7 +170,7 @@ public class SettingsActivity extends Activity {
 
     private void fill(String[] ids, String[] labels) {
         if (list == null) return;
-        int keep = Core.local() ? 4 : 2;    // 保留头部（本地版多一张卡）
+        int keep = Cores.get().local() ? 4 : 2;    // 保留头部（本地版多一张卡）
         while (list.getChildCount() > keep) list.removeViewAt(keep);
         for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i], i));
         list.addView(Ui.gap(this, 10));

@@ -15,10 +15,8 @@ import java.io.ByteArrayOutputStream;
  *   2. rootfs / node / harness 计划放进 files/local/ 下，首次使用下载 + 解包。
  *   3. 起服务时用 proot 进 rootfs，在里面跑 dsh web + devctl-dsh 插件，监听 127.0.0.1:7788。
  */
-final class LocalRuntime {
+final class LocalRuntime implements LocalEnv {
 
-    private LocalRuntime() {
-    }
 
     static File nativeDir(android.content.Context c) {
         return new File(c.getApplicationInfo().nativeLibraryDir);
@@ -52,7 +50,7 @@ final class LocalRuntime {
     }
 
     /** 装到哪一步了（给引导页显示进度）。 */
-    static String state(android.content.Context c) {
+    public String state(android.content.Context c) {
         if (!proot(c).exists()) return "缺 proot（包不完整？）";
         if (!rootfs(c).exists()) return "还没装 rootfs";
         if (!node(c).exists()) return "还没装 Node";
@@ -61,7 +59,7 @@ final class LocalRuntime {
     }
 
     /** 自检：proot 能不能真的跑起来。这是本地模式的第一块砖，先单独验它。 */
-    static String selfCheck(android.content.Context c) {
+    public String selfCheck(android.content.Context c) {
         File p = proot(c);
         if (!p.exists()) return "缺 libproot.so（包没打进去？）";
         if (!p.canExecute()) return "libproot.so 没有执行权限";

@@ -19,6 +19,8 @@ D8_JAR = os.path.join(TOOLS, "d8.jar")
 APKSIGNER_JAR = os.path.join(TOOLS, "apksigner.jar")
 KEYSTORE = os.path.join(TOOLS, "debug.keystore")
 SRC = os.path.join(BASE, "src")
+SHARED = os.path.join(SRC, "shared")        # UI / 协议 / 渲染：两套共用，谁都不许带口味
+FLAVOR_SRC = os.path.join(SRC, "flavor")    # 核心差异：Core/Cores/两个实现/本地运行时
 BUILD = os.path.join(BASE, "build")
 OUT = os.path.join(BASE, "out")
 MIN_API = "24"
@@ -34,6 +36,9 @@ def run(cmd, **kw):
 
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
+# 两个 app 共存：名字要一眼分清（远端连着局域网那台 / 本地把这台手机当 host）
+LABELS = {"remote": "DSH 远端版", "local": "DSH 本地版"}
+PKGS = {"remote": "com.minis.dshconsole", "local": "com.minis.dshconsole.local"}
 FLAVOR = "remote"          # remote = 指向局域网那台；local = harness 跑在 app 里
 for i, a in enumerate(sys.argv):
     if a == "--flavor" and i + 1 < len(sys.argv):
@@ -48,7 +53,7 @@ def write_flavor():
            "    static final boolean LOCAL = %s;\n"
            "    static final String NAME = \"%s\";\n"
            "    private Flavor() {\n    }\n}\n" % ("true" if local else "false", FLAVOR))
-    path = os.path.join(SRC, "com", "minis", "dshconsole", "Flavor.java")
+    path = os.path.join(FLAVOR_SRC, "com", "minis", "dshconsole", "Flavor.java")
     io.open(path, "w", encoding="utf-8").write(src)
     print("[flavor] %s -> %s" % (FLAVOR, path))
 
@@ -65,11 +70,11 @@ def build_manifest():
                 v = node.get(key)
                 if v is not None and v.startswith("."):
                     node.set(key, "com.minis.dshconsole" + v)
-        tree.getroot().set("package", "com.minis.dshconsole.local")
+        tree.getroot().set("package", PKGS[FLAVOR])
     for node in tree.iter():
         key = "{%s}label" % ANDROID_NS
         if node.get(key) == "DSH 控制台":
-            node.set(key, "DSH 控制台" if FLAVOR == "remote" else "DSH 本地版")
+            node.set(key, LABELS[FLAVOR])
     axml = AXML()
     axml.from_xml(tree.getroot())
     data = axml.pack()
@@ -81,12 +86,31 @@ def build_manifest():
     return dst
 
 
+# shared 里只允许通过 Core/LocalEnv 这两个接口碰口味，别的都算越界（避免"一份 UI 两处维护"）
+FORBIDDEN_IN_SHARED = ("Flavor.LOCAL", "new LocalRuntime", "import com.minis.dshconsole.Flavor")
+
+def guard_shared():
+    bad = []
+    for root, _dirs, files in os.walk(SHARED):
+        for f in files:
+            if not f.endswith(".java"):
+                continue
+            path = os.path.join(root, f)
+            text = io.open(path, encoding="utf-8").read()
+            for token in FORBIDDEN_IN_SHARED:
+                if token in text:
+                    bad.append("%s 出现 %s" % (os.path.relpath(path, BASE), token))
+    if bad:
+        sys.exit("!! shared 里出现了口味专用符号，请改成走 Cores.get()/LocalEnv：\n   " + "\n   ".join(bad))
+    print("[guard] shared 干净（只认 Core / LocalEnv）")
+
 def java_sources():
     out = []
-    for root, _dirs, files in os.walk(SRC):
-        for f in files:
-            if f.endswith(".java"):
-                out.append(os.path.join(root, f))
+    for base in (SHARED, FLAVOR_SRC):
+        for root, _dirs, files in os.walk(base):
+            for f in files:
+                if f.endswith(".java"):
+                    out.append(os.path.join(root, f))
     return sorted(out)
 
 
@@ -127,7 +151,7 @@ def package_apk(manifest, dexfile):
         # 本地模式要用的原生件（proot + 它依赖的两个库）：必须以 lib/<abi>/ 进包，
         # 系统才会把它们解到 nativeLibraryDir —— 只有那里允许 exec。
         libdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "libs", "arm64-v8a")
-        if os.path.isdir(libdir):
+        if FLAVOR == "local" and os.path.isdir(libdir):   # proot 只有本地版用得上
             for name in sorted(os.listdir(libdir)):
                 z.write(os.path.join(libdir, name), "lib/arm64-v8a/" + name)
                 print("[lib] %s" % name)
@@ -151,15 +175,26 @@ def sign(unsigned):
     return apk
 
 
-def main():
+def build_one(flavor):
+    """构建一个口味：生成 Flavor.java → 守门 shared → 清单 → javac → d8 → 打包 → 签名。"""
+    global FLAVOR
+    FLAVOR = flavor
     os.makedirs(BUILD, exist_ok=True)
+    print("\n===== 构建 %s（%s / %s）=====" % (flavor, PKGS[flavor], LABELS[flavor]))
     write_flavor()
+    guard_shared()
     manifest = build_manifest()
     classes = compile_java()
     dexfile = dex(classes)
     unsigned = package_apk(manifest, dexfile)
-    sign(unsigned)
+    return sign(unsigned)
 
+def main():
+    flavors = ["remote", "local"] if FLAVOR == "all" else [FLAVOR]
+    built = [build_one(f) for f in flavors]
+    print("\n产物：")
+    for apk in built:
+        print("  %s" % apk)
 
 if __name__ == "__main__":
     main()
