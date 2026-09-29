@@ -88,7 +88,9 @@ public class ChatView extends ScrollView {
             });
         }
         endRow(b);
+        forkPoint = forkSeq;
         col.addView(copyBar(new String[]{text == null ? "" : text}), fullLp());
+        forkPoint = -1;
         scroll(true);
     }
 
@@ -130,8 +132,26 @@ public class ChatView extends ScrollView {
         });
         row.addView(t, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (forkPoint >= 0 && userEditCb != null) {
+            // 「编辑」摆在「复制」右边：长按气泡也能编辑，这里给个看得见的入口
+            TextView e = new TextView(ctx);
+            e.setText("\u270E \u7F16\u8F91");
+            e.setTextSize(Ui.FS_SMALL - 1);
+            e.setTextColor(Ui.MUT);
+            e.setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 6), Ui.dp(ctx, 12), Ui.dp(ctx, 6));
+            e.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    userEditCb.onEdit(forkPoint, src[0] == null ? "" : src[0]);
+                }
+            });
+            row.addView(e, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
         return row;
     }
+
+    /** 这条气泡对应的分叉点（<0 表示不能编辑，比如助手消息）。 */
+    private int forkPoint = -1;
 
     /** 助手整段（历史里的非流式消息）：整宽平铺，不套气泡底。 */
     public void bot(String text) {
