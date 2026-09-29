@@ -49,7 +49,7 @@ public class MainActivity extends Activity {
         Ui.applyTheme(this);          // 先刷调色板，后面所有控件才拿得到对的颜色
         // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-        getWindow().setStatusBarColor(Ui.PANEL);
+        getWindow().setStatusBarColor(Ui.BG);      // 状态栏跟顶栏、消息区连成一片
         getWindow().setNavigationBarColor(Ui.PANEL);
         if (!Ui.DARK) {               // 亮色下状态栏图标要压黑，不然白字看不见
             getWindow().getDecorView().setSystemUiVisibility(
@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
     private View topBar() {
         LinearLayout bar = Ui.row(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackgroundColor(Ui.PANEL);
+        bar.setBackgroundColor(Ui.BG);          // 顶栏跟消息区同色，靠下面的渐隐收口
         int p = Ui.dp(this, 8);
         bar.setPadding(p, Ui.dp(this, 8), p, Ui.dp(this, 8));
 
