@@ -1018,8 +1018,11 @@ public class ChatView extends ScrollView {
         TextView t = Ui.tv(ctx, s == null ? "" : s, Ui.FS_BODY, color);
         t.setText(md(s));
         t.setLineSpacing(0, 1.25f);                    // Minis 正文 16sp / 行高≈19-20sp（1.25 倍）
-        t.setTextIsSelectable(true);
-        markLinks(t, s);                               // 有链接才上 MovementMethod（会顶掉长按选词）
+        if (hasLink(s)) {
+            markLinks(t, s);                           // 有链接：可点（这条消息放弃长按选词）
+        } else {
+            t.setTextIsSelectable(true);               // 没链接：保持长按选词、出系统复制菜单
+        }
         return t;
     }
 
@@ -1243,10 +1246,15 @@ public class ChatView extends ScrollView {
 
     /** 有链接的正文才上 LinkMovementMethod（它会顶掉长按选词，所以按需上）。 */
     private void markLinks(TextView tv, String s) {
-        if (hasLink(s) && tv.getMovementMethod() == null) {
-            tv.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
-            tv.setHighlightColor(0);
+        if (!hasLink(s)) {
+            return;
         }
+        if (tv.getMovementMethod() instanceof android.text.method.LinkMovementMethod) {
+            return;
+        }
+        tv.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+        tv.setHighlightColor(0);
+        tv.setLinkTextColor(Ui.ACCENT);
     }
 
     private void dropEmpty() {
