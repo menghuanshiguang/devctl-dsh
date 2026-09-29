@@ -1104,6 +1104,8 @@ public class TabChat extends Tab {
     }
 
     /** 运行期噪音（step/session-log/queue…）：这些不是对话，别往屏幕上摆。 */
+    private final java.util.HashSet<String> toolNames = new java.util.HashSet<String>();
+
     private static boolean noise(String ty) {
         if (ty == null) {
             return true;
@@ -1216,7 +1218,9 @@ public class TabChat extends Tab {
         } else if ("assistant".equals(kind)) {
             cv.bot(DshConsole.clamp(r.optString("text", ""), 8000));
         } else if ("tool-call".equals(kind)) {
-            cv.tool(r.optString("name", "?"), r.optString("arguments", ""));
+            String tn = r.optString("name", "?");
+            toolNames.add(tn);
+            cv.tool(tn, r.optString("arguments", ""));
         } else if ("tool-result".equals(kind)) {
             JSONObject e = r.optJSONObject("error");
             if (e != null) {
@@ -1227,12 +1231,16 @@ public class TabChat extends Tab {
             }
         } else if ("event".equals(kind)) {
             String ty = r.optString("type", "");
-            if (ty.length() > 0 && !noise(ty)) cv.note("· " + ty, Ui.DIM);
+            if (ty.length() > 0 && !noise(ty) && !toolNames.contains(ty)
+                    && ty.indexOf('/') < 0) {                        // 工具名不再重复提示：卡片里已经有了
+                cv.note("· " + ty, Ui.DIM);
+            }
         } else if ("turn-start".equals(kind)) {
             cv.note("▷ 回合 " + r.optLong("turn", 0), Ui.DIM);
         } else if ("turn-end".equals(kind)) {
             String reason = r.optString("reason", "");
             cv.note("— 回合结束" + (reason.length() > 0 ? " · " + reason : ""), Ui.DIM);
+            cv.snapToBottom();                     // 收尾再钉一次真正的底部
         }
     }
 
