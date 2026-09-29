@@ -802,7 +802,6 @@ public class ChatView extends ScrollView {
                     open[0] = !open[0];
                     for (int i = 0; i < traces.size(); i++) {
                         View tr = traces.get(i);
-                        if ("hidethink".equals(tr.getTag())) continue;   // 纯思考的那块保持隐藏
                         tr.setVisibility(open[0] ? View.VISIBLE : View.GONE);
                     }
                     t.setText(open[0] ? "收起过程" : "过程 \u00D7" + rows);
@@ -2810,10 +2809,6 @@ public class ChatView extends ScrollView {
             open = false;                                  // 思考结束自动收起，只留表头（DeepSeek 的框也是这样）
             body.setVisibility(View.GONE);
             if (bodyWrap != null) bodyWrap.setVisibility(View.GONE);
-            if (tools == 0) {                              // 纯思考的过程组：结束后整块隐掉，不留"思考 · 用时"
-                box.setTag("hidethink");
-                box.setVisibility(View.GONE);
-            }
             refresh();
         }
 
