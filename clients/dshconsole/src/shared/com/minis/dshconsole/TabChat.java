@@ -125,8 +125,9 @@ public class TabChat extends Tab {
     }
 
     /**
-     * 输入法动画：窗口设成 adjustNothing（不然系统会硬跳一下），
-     * 位移由我们自己按 IME 的那条 inset 做 220ms 的平移动画 —— 输入卡是"滑"上来的。
+     * 输入法动画：窗口设成 ADJUST_NOTHING（不然系统直接硬压，没有过渡），
+     * 位移由我们自己按 IME 那条 inset 做 220ms 平移动画 —— 整页（消息列表 + 输入卡）一起滑上来，
+     * 不会出现"输入卡上去了、消息被键盘压住"的割裂感。
      */
     private void installImeAnimation(final View composer) {
         if (android.os.Build.VERSION.SDK_INT < 30) return;        // 30 以下拿不到 IME 类型 inset，就保持系统行为
@@ -363,7 +364,7 @@ public class TabChat extends Tab {
         outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
         box.addView(outer);
-        installImeAnimation(outer);          // 输入法弹出时把这块"托"上去
+        installImeAnimation(box);            // 输入法弹出时整页（列表+输入卡）一起"托"上去
         return box;
     }
 

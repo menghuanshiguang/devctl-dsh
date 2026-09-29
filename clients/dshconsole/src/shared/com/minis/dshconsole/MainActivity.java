@@ -47,7 +47,10 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         Ui.applyTheme(this);
-        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        // 关键：代码里的 setSoftInputMode 会盖过清单 —— 原来这里是 ADJUST_RESIZE，
+        // 所以键盘一弹整个窗口被系统硬压上去（没有过渡），我加在输入卡上的平移动画就白做了。
+        // 改成 ADJUST_NOTHING：窗口不动，位移完全由 TabChat.installImeAnimation() 做动画。
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
                 | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);   // 回到前台不自动弹输入法（点输入框才弹）          // 先刷调色板，后面所有控件才拿得到对的颜色
         // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
