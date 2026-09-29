@@ -29,6 +29,8 @@ public class SettingsActivity extends Activity {
     private static final String[] D_LABELS = {"通用设置", "模型", "内置插件", "Agent 预设", "devctl", "规则设定", "插件市场", "侧边卡片"};
 
     private LinearLayout list;
+    /** 「DSH 设置」那张分组卡片（分区行往这里填）。 */
+    private LinearLayout secCard;
     /** 顶部那行「设备 · xx」小字。 */
     private TextView subTitle;
     private Handler ui;
@@ -62,90 +64,164 @@ public class SettingsActivity extends Activity {
     private View scaffold() {
         LinearLayout col = Ui.col(this);
         col.setBackgroundColor(Ui.BG);
-
-        col.addView(topBar());                       // 顶栏跟主页面同一套：18dp 内边距 + 15.5f 标题 + 发丝线
-
-        LinearLayout body = Ui.col(this);
-        int ph = Ui.dp(this, Ui.PAD_H);
-        body.setPadding(ph, Ui.dp(this, 10), ph, Ui.dp(this, 26));   // 底部留出系统导航栏，别再被切
-        col.addView(body, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        col.addView(topBar());
 
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
-        list = Ui.col(this);
-        list.addView(appearanceRow());           // 外观（跟随系统 / 深色 / 浅色）
-        list.addView(Ui.gap(this, 10));
-        if (Cores.get().local()) {                // 本地版才有的卡片，远端版这行不显示
-            list.addView(localCard());
-            list.addView(Ui.gap(this, 10));
-        }
-        TextView sec = Ui.tv(this, "DSH 原版设置", 11.5f, Ui.DIM);   // 跟侧栏的 section 表头同一档
-        list.addView(sec);
-        list.addView(Ui.gap(this, 8));
-        sc.addView(list, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        body.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout body = Ui.col(this);
+        int ph = Ui.dp(this, 8);
+        body.setPadding(ph, Ui.dp(this, 2), ph, Ui.dp(this, 28));
+        sc.addView(body, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        col.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        body.addView(Ui.gap(this, 10));
-        body.addView(webRow());                  // 原版网页也做成一张卡，形状跟上面统一
+        list = body;
+
+        // 应用
+        LinearLayout appCard = group(body, "应用");
+        appCard.addView(appearanceItem());
+        divider(appCard);
+        appCard.addView(webRow());
+
+        // DSH 设置（分区表由 host 给，或内置表）
+        secCard = group(body, "DSH 设置");
+
+        // 关于
+        LinearLayout aboutCard = group(body, "关于");
+        aboutCard.addView(infoRow("设备", deviceLine()));
+        divider(aboutCard);
+        aboutCard.addView(infoRow("运行模式", Cores.get().local() ? "本地 harness（app 内）" : "远端（局域网那台）"));
+
+        if (Cores.get().local()) {                     // 本地版才有的那张卡
+            body.addView(localCard());
+        }
         return col;
     }
 
-    /** 一行分区：标题 + 说明 + ›，点了开二级活动。 */
+    /** 只读信息行（无 chevron、点不动）。 */
+    private View infoRow(String key, String value) {
+        LinearLayout r = Ui.row(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setMinimumHeight(Ui.dp(this, 50));
+        r.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
+        r.addView(Ui.tv(this, key, 16f, Ui.TEXT),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView v = Ui.tv(this, value == null ? "" : value, 15f, Ui.MUT);
+        v.setSingleLine(true);
+        v.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        r.addView(v);
+        return r;
+    }
+
+    /**
+     * 一行（照参考图）：[图标 24dp] gap [标题 16f] ... [右侧值 15f 灰] [chevron]。
+     * 不再"每行一张卡+副标题"，而是紧凑一行，调用方负责放进分组卡片里。
+     */
     private View item(final String id, final String label, final int index) {
         LinearLayout r = Ui.row(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
-        LinearLayout tx = Ui.col(this);
-        tx.addView(Ui.tv(this, label, 15.5f, Ui.TEXT));
-        String sub = hint(id);
-        if (sub.length() > 0) tx.addView(Ui.tv(this, sub, 12f, Ui.MUT));
-        r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        r.addView(Ui.tv(this, "›", 17f, Ui.MUT));
-        r.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, this));
-        Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
+        r.setMinimumHeight(Ui.dp(this, 54));
+        r.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
+
+        TextView icon = Ui.tv(this, glyphOf(id), 15f, Ui.DIM);
+        icon.setGravity(Gravity.CENTER);
+        r.addView(icon, new LinearLayout.LayoutParams(Ui.dp(this, 24),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView title = Ui.tv(this, label, 16f, Ui.TEXT);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        tlp.leftMargin = Ui.dp(this, 12);
+        r.addView(title, tlp);
+
+        String value = hint(id);
+        if (value.length() > 0) {
+            TextView v = Ui.tv(this, DshConsole.clamp(value, 18), 15f, Ui.MUT);
+            v.setSingleLine(true);
+            v.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            vlp.rightMargin = Ui.dp(this, 4);
+            r.addView(v, vlp);
+        }
+        r.addView(Ui.tv(this, "\u203A", 17f, Ui.MUT));
+        Ui.press(r, this, Ui.SURF3, 0);
         r.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 openPanel(id, label, index);
             }
         });
-        LinearLayout wrap = Ui.col(this);
-        wrap.addView(r, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        wrap.addView(Ui.gap(this, 6));
-        return wrap;
+        return r;
     }
 
-    /** 顶栏：跟 MainActivity 同款（左边返回键、中间标题 + 一行小字、下面发丝线）。 */
-    private View topBar() {
-        LinearLayout bar = Ui.row(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(Ui.dp(this, 18), Ui.dp(this, 8), Ui.dp(this, 18), Ui.dp(this, 8));
+    /** 每行左边那个小图标（没有图标资源，就用单色几何字符，深色下不会跳出彩色 emoji）。 */
+    private static String glyphOf(String id) {
+        if ("general".equals(id)) return "\u2699";
+        if ("models".equals(id)) return "\u25C7";
+        if ("plugins".equals(id)) return "\u29C9";
+        if ("presets".equals(id)) return "\u2726";
+        if ("devctl".equals(id)) return "\u2318";
+        if ("rules".equals(id)) return "\u2696";
+        if ("market".equals(id)) return "\u229E";
+        if ("cards".equals(id)) return "\u25A6";
+        return "\u25CB";
+    }
 
-        TextView back = Ui.tv(this, "\u2039", 26f, Ui.TEXT);
+    /** 顶栏（照参考图）：左边一个圆形返回键，标题居中，无发丝线。 */
+    private View topBar() {
+        android.widget.FrameLayout bar = new android.widget.FrameLayout(this);
+        int vp = Ui.dp(this, 6);
+        bar.setPadding(Ui.dp(this, 12), vp, Ui.dp(this, 12), vp);
+
+        TextView back = Ui.tv(this, "\u2039", 22f, Ui.TEXT);
         back.setGravity(Gravity.CENTER);
-        back.setPadding(0, 0, Ui.dp(this, 12), 0);
+        back.setBackground(Ui.bg(Ui.SURF2, 20, this));
+        android.widget.FrameLayout.LayoutParams blp = new android.widget.FrameLayout.LayoutParams(
+                Ui.dp(this, 40), Ui.dp(this, 40));
+        blp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
         back.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 finish();
             }
         });
-        bar.addView(back);
+        bar.addView(back, blp);
 
-        LinearLayout mid = Ui.col(this);
-        mid.addView(Ui.tv(this, "设置", 15.5f, Ui.TEXT));
-        subTitle = Ui.tv(this, deviceLine(), 11f, Ui.DIM);
-        mid.addView(subTitle);
-        bar.addView(mid, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView title = Ui.tv(this, "设置", 18f, Ui.TEXT);
+        title.setGravity(Gravity.CENTER);
+        android.widget.FrameLayout.LayoutParams tlp = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+        tlp.gravity = Gravity.CENTER;
+        bar.addView(title, tlp);
+        return bar;
+    }
 
+    /** 分组卡片：一个圆角容器装若干行，行之间是"从文字处开始"的发丝线（照参考图）。 */
+    private LinearLayout group(LinearLayout parent, String header) {
         LinearLayout wrap = Ui.col(this);
-        wrap.addView(bar, new LinearLayout.LayoutParams(
+        if (header != null && header.length() > 0) {
+            TextView h = Ui.tv(this, header, 12.5f, Ui.MUT);
+            h.setPadding(Ui.dp(this, 16), Ui.dp(this, 16), 0, Ui.dp(this, 7));
+            wrap.addView(h);
+        }
+        LinearLayout card = Ui.col(this);
+        card.setBackground(Ui.bg(Ui.SURF2, 14, this));
+        card.setClipToOutline(true);
+        wrap.addView(card, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        View hair = new View(this);
-        hair.setBackgroundColor(Ui.STROKE2);
-        wrap.addView(hair, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(this, 0.5f))));
-        return wrap;
+        parent.addView(wrap);
+        return card;
+    }
+
+    /** 组内分隔线：左边从文字起始处缩进（图标那一段留白），跟参考图一致。 */
+    private void divider(LinearLayout card) {
+        if (card.getChildCount() == 0) return;
+        View line = new View(this);
+        line.setBackgroundColor(Ui.STROKE2);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(this, 0.5f)));
+        lp.leftMargin = Ui.dp(this, 52);
+        card.addView(line, lp);
     }
 
     /** 顶部那行小字：远端版写「设备 · 192.168.x.x:7788」，本地版写「本地 harness · 127.0.0.1:7788」。 */
@@ -155,20 +231,33 @@ public class SettingsActivity extends Activity {
     }
 
     /** 外观：跟随系统 / 深色 / 浅色。改完立刻重建自己（颜色都是构造时定的）。 */
-    private View appearanceRow() {
+    /** 外观行（照参考图）：图标 + 标题 + 右侧当前值 + chevron，点开三选一。 */
+    private View appearanceItem() {
         final String cur = themePref();
         LinearLayout r = Ui.row(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
-        r.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, this));
-        LinearLayout tx = Ui.col(this);
-        tx.addView(Ui.tv(this, "外观", 15.5f, Ui.TEXT));
-        tx.addView(Ui.tv(this, themeLabel(cur), 12f, Ui.MUT));
-        r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.setMinimumHeight(Ui.dp(this, 54));
+        r.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
+
+        TextView icon = Ui.tv(this, "\u263D", 15f, Ui.DIM);
+        icon.setGravity(Gravity.CENTER);
+        r.addView(icon, new LinearLayout.LayoutParams(Ui.dp(this, 24),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        tlp.leftMargin = Ui.dp(this, 12);
+        r.addView(Ui.tv(this, "外观", 16f, Ui.TEXT), tlp);
+
+        TextView v = Ui.tv(this, themeLabel(cur), 15f, Ui.MUT);
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        vlp.rightMargin = Ui.dp(this, 4);
+        r.addView(v, vlp);
         r.addView(Ui.tv(this, "\u203A", 17f, Ui.MUT));
-        Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
+
+        Ui.press(r, this, Ui.SURF3, 0);
         r.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
+            public void onClick(View v2) {
                 final String[] keys = {"system", "dark", "light"};
                 String[] labels = {"跟随系统", "深色", "浅色"};
                 new AlertDialog.Builder(SettingsActivity.this)
@@ -176,8 +265,8 @@ public class SettingsActivity extends Activity {
                         .setItems(labels, new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 new Store(SettingsActivity.this).set("theme", keys[w]);
-                                Ui.themeDirty = true;               // 主界面回来时自己重建
-                                recreate();                          // 设置页当场重建
+                                Ui.themeDirty = true;
+                                recreate();
                             }
                         })
                         .setNegativeButton("取消", null)
@@ -252,11 +341,12 @@ public class SettingsActivity extends Activity {
     }
 
     private void fill(String[] ids, String[] labels) {
-        if (list == null) return;
-        int keep = Cores.get().local() ? 4 : 2;    // 保留头部（本地版多一张卡）
-        while (list.getChildCount() > keep) list.removeViewAt(keep);
-        for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i], i));
-        list.addView(Ui.gap(this, 10));
+        if (secCard == null) return;
+        secCard.removeAllViews();
+        for (int i = 0; i < ids.length; i++) {
+            if (i > 0) divider(secCard);
+            secCard.addView(item(ids[i], labels[i], i));
+        }
     }
 
     /** 分区表问 host（settings.sections）；host 没实现就保持内置表。 */
@@ -311,24 +401,28 @@ public class SettingsActivity extends Activity {
 
     // —— 底部：原版网页入口（二级页直接吃 DSH 自己的网页，插件分区就不会漏） ——
 
+    /** 原版网页：同一行样式，右侧显示"自动/已设置"。 */
     private View webRow() {
         LinearLayout r = Ui.row(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
-        r.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, this));
-        LinearLayout tx = Ui.col(this);
-        tx.addView(Ui.tv(this, "原版网页", 15.5f, Ui.TEXT));
+        r.setMinimumHeight(Ui.dp(this, 54));
+        r.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
+
+        TextView icon = Ui.tv(this, "\u25A6", 15f, Ui.DIM);
+        icon.setGravity(Gravity.CENTER);
+        r.addView(icon, new LinearLayout.LayoutParams(Ui.dp(this, 24),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        tlp.leftMargin = Ui.dp(this, 12);
+        r.addView(Ui.tv(this, "原版网页", 16f, Ui.TEXT), tlp);
+
         String u = webUrl();
-        TextView sub = Ui.tv(this, u.length() == 0 ? "自动 · 开了网页窗口就直接看原版界面" : u, 12f, Ui.MUT);
-        sub.setSingleLine(true);
-        sub.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);      // 那串 token 别再折三行
-        tx.addView(sub);
-        r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView edit = Ui.tv(this, u.length() == 0 ? "设置" : "改", 12.5f, Ui.ACCENT);
-        edit.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
-        edit.setBackground(Ui.bg(Ui.SURF3, 12, this));
-        r.addView(edit);
-        Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
+        r.addView(Ui.tv(this, u.length() == 0 ? "自动" : "已设置", 15f, Ui.MUT),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        r.addView(Ui.tv(this, "\u203A", 17f, Ui.MUT));
+        Ui.press(r, this, Ui.SURF3, 0);
         r.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 webDialog();
