@@ -9,6 +9,7 @@
     <application
         android:label="DSH 控制台"
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"

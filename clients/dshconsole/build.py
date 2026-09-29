@@ -3,6 +3,7 @@
 """在 Android(aarch64) 上无 Gradle 构建 APK:
     javac(JDK17) -> d8 -> 手写二进制 manifest(pyaxml) -> zip -> apksigner
 """
+import io
 import os
 import subprocess
 import sys
@@ -32,8 +33,43 @@ def run(cmd, **kw):
     return r
 
 
+ANDROID_NS = "http://schemas.android.com/apk/res/android"
+FLAVOR = "remote"          # remote = 指向局域网那台；local = harness 跑在 app 里
+for i, a in enumerate(sys.argv):
+    if a == "--flavor" and i + 1 < len(sys.argv):
+        FLAVOR = sys.argv[i + 1]
+
+def write_flavor():
+    """按 flavor 生成 Flavor.java：源码里不手改，两套 app 的差异就在这几个常量上。"""
+    local = FLAVOR == "local"
+    src = ("package com.minis.dshconsole;\n\n"
+           "/** 由 build.py --flavor 生成，别手改。 */\n"
+           "final class Flavor {\n"
+           "    static final boolean LOCAL = %s;\n"
+           "    static final String NAME = \"%s\";\n"
+           "    private Flavor() {\n    }\n}\n" % ("true" if local else "false", FLAVOR))
+    path = os.path.join(SRC, "com", "minis", "dshconsole", "Flavor.java")
+    io.open(path, "w", encoding="utf-8").write(src)
+    print("[flavor] %s -> %s" % (FLAVOR, path))
+
 def build_manifest():
     tree = etree.parse(os.path.join(BASE, "AndroidManifest.xml"))
+    # 两套 app 并存：包名和名字都带 flavor 后缀（本地版叫「DSH 本地版」）
+    if FLAVOR == "local":
+        # 换包名是为了两套 app 并存；但 Activity 在清单里写的是相对名（.MainActivity），
+        # 换包名后会被解析成 com.minis.dshconsole.local.MainActivity（不存在）→ 一启动就崩。
+        # 所以这里把相对名补成绝对名（Java 包名不变，只动清单）。
+        for node in tree.iter():
+            for attr in ("name", "targetActivity"):
+                key = "{%s}%s" % (ANDROID_NS, attr)
+                v = node.get(key)
+                if v is not None and v.startswith("."):
+                    node.set(key, "com.minis.dshconsole" + v)
+        tree.getroot().set("package", "com.minis.dshconsole.local")
+    for node in tree.iter():
+        key = "{%s}label" % ANDROID_NS
+        if node.get(key) == "DSH 控制台":
+            node.set(key, "DSH 控制台" if FLAVOR == "remote" else "DSH 本地版")
     axml = AXML()
     axml.from_xml(tree.getroot())
     data = axml.pack()
@@ -88,6 +124,13 @@ def package_apk(manifest, dexfile):
     with zipfile.ZipFile(unsigned, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(manifest, "AndroidManifest.xml")
         z.write(dexfile, "classes.dex")
+        # 本地模式要用的原生件（proot + 它依赖的两个库）：必须以 lib/<abi>/ 进包，
+        # 系统才会把它们解到 nativeLibraryDir —— 只有那里允许 exec。
+        libdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "libs", "arm64-v8a")
+        if os.path.isdir(libdir):
+            for name in sorted(os.listdir(libdir)):
+                z.write(os.path.join(libdir, name), "lib/arm64-v8a/" + name)
+                print("[lib] %s" % name)
     print("[zip] %d bytes" % os.path.getsize(unsigned))
     return unsigned
 
@@ -95,7 +138,7 @@ def package_apk(manifest, dexfile):
 def sign(unsigned):
     if not os.path.isdir(OUT):
         os.makedirs(OUT)
-    apk = os.path.join(OUT, "dshconsole.apk")
+    apk = os.path.join(OUT, "dshconsole-%s.apk" % FLAVOR)
     if os.path.exists(apk):
         os.remove(apk)
     run(["java", "-jar", APKSIGNER_JAR, "sign",
@@ -110,6 +153,7 @@ def sign(unsigned):
 
 def main():
     os.makedirs(BUILD, exist_ok=True)
+    write_flavor()
     manifest = build_manifest()
     classes = compile_java()
     dexfile = dex(classes)
