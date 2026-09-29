@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path'
 import { svg as qrSvg } from './qr.js'
 import { DEFAULT_WEB_PORT, installRemoteWeb } from './remote-web.js'
 
-const VERSION = '1.2.1'
+const VERSION = '1.3.0'
 const PROTOCOL = 1
 /** This package's name: the loader row id, the client bundle id, and the graph key. */
 const PACKAGE_NAME = 'devctl-dsh'
@@ -332,9 +332,7 @@ async function serveLine(bridge, connection, line) {
         time: Date.now(),
         // 手机端（clients/dshconsole）的「设置」面板直接吃 DSH 自己的网页界面，
         // 这里告诉它窗口在不在、在几号端口，省得客户端猜端口或探测。
-        web: bridge.web
-          ? { port: bridge.web.port ?? null, ready: !!bridge.web.ready, reason: bridge.web.reason ?? '' }
-          : null,
+        web: webPayload(bridge),
       },
     })
     return
@@ -626,15 +624,32 @@ function statusPayload(bridge) {
     uptimeMs: Date.now() - bridge.startedAt,
     peers,
     livePeers: peers.filter((peer) => peer.live).length,
-    web: bridge.web
-      ? { port: bridge.web.port ?? null, ready: !!bridge.web.ready, reason: bridge.web.reason ?? '', origin: bridge.web.origin ?? null }
-      : null,
+    web: webPayload(bridge),
   }
 }
 
 /** Colours land in an SVG attribute, so only strict literal hex passes. */
 function normaliseColor(value, fallback) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(value) ? value : fallback
+}
+
+/**
+ * The one place the `web` block is shaped: the phone opens `url` verbatim when
+ * `ready` is true, and reads `reason`/`seen` when it is not, so it never has to
+ * guess a port or sweep loopback itself.
+ */
+function webPayload(bridge) {
+  const web = bridge?.web
+  if (!web) return null
+  return {
+    port: web.port ?? null,
+    ready: !!web.ready,
+    reason: web.reason ?? '',
+    target: web.origin || bridge.webOrigin || null,
+    url: web.url || null,
+    source: web.reason === 'host-service' ? 'host' : web.reason === 'configured' ? 'config' : web.ready ? 'discovered' : 'none',
+    seen: Array.isArray(web.seen) ? web.seen.slice(0, 8) : [],
+  }
 }
 
 function sendJson(response, status, payload) {
@@ -655,6 +670,81 @@ function sendJson(response, status, payload) {
  * route only registers where that service exists; a Host composing the web
  * server without the connection carrier gets no settings page at all.
  */
+/** Constant-time compare that never throws on a length mismatch. */
+function tokenMatches(offered, expected) {
+  const left = Buffer.from(String(offered ?? ''), 'utf8')
+  const right = Buffer.from(String(expected ?? ''), 'utf8')
+  return left.length > 0 && left.length === right.length && timingSafeEqual(left, right)
+}
+
+/**
+ * Our own loopback discovery probe (see remote-web.js). The settings route sits
+ * behind the Host browser-trust check, which a bare Node request can never pass —
+ * so the probe presents the control token in `?probe=` and we wave it through.
+ */
+function isWebSelfProbe(request, bridge, statusPath) {
+  if (!bridge?.token) return false
+  let url
+  try {
+    url = new URL(request?.url ?? '/', 'http://127.0.0.1')
+  } catch {
+    return false
+  }
+  if (url.pathname !== statusPath) return false
+  return tokenMatches(url.searchParams.get('probe') ?? '', bridge.token)
+}
+
+/**
+ * DSH's own web server knows the port it listens on, so ask it instead of
+ * sweeping the loopback range. The service shape is Host-private, so every
+ * plausible accessor is tried and the keys are kept for diagnosis.
+ */
+function webServerPort(webServer) {
+  if (!webServer || typeof webServer !== 'object') return 0
+  const paths = [
+    ['port'],
+    ['address', 'port'],
+    ['server', 'address', 'port'],
+    ['httpServer', 'address', 'port'],
+    ['httpServer', 'address'],
+    ['url'],
+    ['origin'],
+    ['baseUrl'],
+  ]
+  for (const keys of paths) {
+    let cur = webServer
+    for (const key of keys) {
+      if (cur == null) break
+      cur = cur[key]
+    }
+    if (typeof cur === 'function') {
+      try {
+        cur = cur.call(webServer)
+      } catch {
+        continue
+      }
+    }
+    const text = typeof cur === 'string' ? cur : cur && typeof cur === 'object' ? String(cur.port ?? '') : String(cur ?? '')
+    const found = /(\d{2,5})/.exec(text)
+    const port = found ? Number(found[1]) : 0
+    if (Number.isInteger(port) && port > 0 && port <= 65535) return port
+  }
+  return 0
+}
+
+/** Hand the Host's own web origin to the LAN proxy as soon as we can read it. */
+function publishWebServiceOrigin(webServer, bridge) {
+  try {
+    bridge.webServiceKeys = Object.keys(webServer ?? {}).slice(0, 24)
+    const port = webServerPort(webServer)
+    if (!port) return
+    bridge.webOrigin = `http://127.0.0.1:${port}`
+    bridge.web?.setTarget?.(bridge.webOrigin)
+  } catch {
+    // Reading a Host-private object must never break route installation.
+  }
+}
+
 function rejectUntrustedRequest(connection, request, response) {
   let rejection
   try {
@@ -687,6 +777,7 @@ function installSettingsRoutes(ctx, bridge) {
     host.effect(
       () => {
         const disposers = []
+        publishWebServiceOrigin(host.webServer, bridge)
         const add = (spec, label) => {
           try {
             disposers.push(host.webServer.register(spec, label))
@@ -695,6 +786,10 @@ function installSettingsRoutes(ctx, bridge) {
           }
         }
         const guarded = (handler) => (request, response) => {
+          if (isWebSelfProbe(request, bridge, STATUS_PATH)) {
+            sendJson(response, 200, statusPayload(bridge))
+            return
+          }
           if (rejectUntrustedRequest(host.connection, request, response)) return
           handler(request, response)
         }

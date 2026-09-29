@@ -45,36 +45,48 @@ function sameToken(a, b) {
   return timingSafeEqual(left, right)
 }
 
-/** Ask one loopback port for our own settings endpoint: a self-identifying probe. */
-function probePort(port, statusPath) {
+/**
+ * Ask one loopback port for our own settings endpoint: a self-identifying probe.
+ * The plugin's own route sits behind DSH's browser-trust check, so the probe
+ * carries the control token in `?probe=` and the route waves it through.
+ */
+function probePort(port, statusPath, probeToken) {
+  const path = probeToken ? `${statusPath}?probe=${encodeURIComponent(probeToken)}` : statusPath
   return new Promise((resolve) => {
     const req = httpRequest(
-      { host: '127.0.0.1', port, path: statusPath, method: 'GET', headers: { accept: 'application/json' } },
+      { host: '127.0.0.1', port, path, method: 'GET', headers: { accept: 'application/json' } },
       (res) => {
         let size = 0
         res.on('data', (chunk) => {
           size += chunk.length
         })
-        res.on('end', () => resolve(res.statusCode === 200 && size > 0))
+        res.on('end', () => resolve({ ok: res.statusCode === 200 && size > 0, status: res.statusCode ?? 0 }))
       },
     )
     req.setTimeout(1200, () => req.destroy())
-    req.on('error', () => resolve(false))
+    req.on('error', () => resolve({ ok: false, status: 0 }))
     req.end()
   })
 }
 
-/** Find the loopback port the Host web server listens on, or '' when it is not up. */
-export async function discoverHostWeb(statusPath) {
+/**
+ * Find the loopback port the Host web server listens on. Never returns null —
+ * `origin` is '' when nothing answered, and `seen` lists every port that spoke
+ * HTTP at all (401/404 included) so the phone can show why it failed.
+ */
+export async function discoverHostWeb(statusPath, probeToken) {
   const tried = new Set()
+  const seen = []
   const ports = [...COMMON_PORTS]
   for (let p = 3000; p <= 3100; p += 1) ports.push(p)
   for (const port of ports) {
     if (tried.has(port)) continue
     tried.add(port)
-    if (await probePort(port, statusPath)) return { port, origin: `http://127.0.0.1:${port}` }
+    const hit = await probePort(port, statusPath, probeToken)
+    if (hit.status > 0 && hit.status !== 404) seen.push({ port, status: hit.status })
+    if (hit.ok) return { port, origin: `http://127.0.0.1:${port}`, seen }
   }
-  return null
+  return { port: 0, origin: '', seen }
 }
 
 /** Pull one header out of the raw header list (Node gives us no case-insensitive map there). */
@@ -127,7 +139,7 @@ export function installRemoteWeb({
   warn = () => {},
 } = {}) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) return null
-  const info = { port, origin: target, ready: false, reason: target ? 'configured' : 'searching' }
+  const info = { port, origin: target, ready: false, reason: target ? 'configured' : 'searching', url: '', seen: [] }
   let searching = null
 
   const ensureOrigin = () => {
@@ -137,9 +149,10 @@ export function installRemoteWeb({
       return Promise.resolve(info.origin)
     }
     if (!searching) {
-      searching = discoverHostWeb(statusPath)
+      searching = discoverHostWeb(statusPath, token)
         .then((found) => {
-          if (!found) {
+          info.seen = found.seen ?? []
+          if (!found.origin) {
             info.ready = false
             info.reason = 'host-web-not-found'
             return ''
@@ -157,9 +170,31 @@ export function installRemoteWeb({
         })
         .finally(() => {
           searching = null
+          syncUrl()
         })
     }
     return searching
+  }
+
+  /**
+   * The one URL the phone should open: the LAN listener plus the control token.
+   * Exposed over the authenticated devctl channel, so it leaks nothing new.
+   */
+  const syncUrl = () => {
+    const address = addresses()[0] ?? ''
+    info.url = info.ready && address ? `http://${address}:${info.port}/?token=${encodeURIComponent(token ?? '')}` : ''
+  }
+
+  /** The Host web server knows its own port; prefer it over any port sweep. */
+  const setTarget = (origin) => {
+    if (typeof origin !== 'string' || origin.length === 0) return false
+    info.origin = origin
+    info.ready = true
+    info.reason = 'host-service'
+    searching = null
+    syncUrl()
+    log(`web window target ${origin} (from the Host web server)`)
+    return true
   }
 
   const addresses = () => {
@@ -200,6 +235,8 @@ export function installRemoteWeb({
         port: info.port,
         origin: info.origin,
         reason: info.reason,
+        url: info.url,
+        seen: info.seen,
         addresses: addresses(),
       })
       const body = Buffer.from(payload, 'utf8')
@@ -306,6 +343,7 @@ export function installRemoteWeb({
 
   return {
     info,
+    setTarget,
     health: () => ensureOrigin().then(() => info),
     dispose: () =>
       new Promise((resolve) => {
