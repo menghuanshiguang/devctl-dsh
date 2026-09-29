@@ -59,7 +59,6 @@ public class TabChat extends Tab {
     public TabChat(MainActivity a) {
         super(a);
         installImgLoader();
-        wireInteractiveCards();
     }
 
     /** 审批 / 提问卡上的按钮：点一下就发一条一次性 RPC 回 host。 */
@@ -186,6 +185,7 @@ public class TabChat extends Tab {
         box.addView(st);
 
         cv = new ChatView(act);
+        wireInteractiveCards();          // 必须等 cv 建好；放构造器/开头都是 NPE
         final android.widget.TextView jump = new android.widget.TextView(act);   // 右下角下箭头
         jump.setText("\u2193");
         jump.setTextSize(18);
