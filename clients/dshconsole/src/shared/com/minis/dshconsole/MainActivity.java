@@ -120,6 +120,14 @@ public class MainActivity extends Activity {
 
         select(1);
         connectDsh(false);
+        if (reopenDrawerAfterRecreate) {         // 换主题重建后，把抽屉还回来
+            reopenDrawerAfterRecreate = false;
+            side.post(new Runnable() {
+                public void run() {
+                    openDrawer();
+                }
+            });
+        }
         // 回到上次那个会话（顺带也是调试入口：渲染历史会把可疑原文打进 logcat）
         try {
             String last = store.lastSession(dshName);
@@ -238,6 +246,46 @@ public class MainActivity extends Activity {
             default: closeDsh(); connectDsh(true); break;
         }
         if (w != 1) closeDrawer();          // 动作做完收回抽屉；刷新留着看结果
+    }
+
+    /** 侧栏那个按钮：深⇄浅 直接切。改完必须重建（颜色都是构造时定的），顺手做个淡入淡出。 */
+    /** 因为换主题而重建时，重建后把抽屉再拉开（不然用户点一下主题就被"弹出抽屉"）。 */
+    private boolean reopenDrawerAfterRecreate = false;
+
+    public void toggleTheme() {
+        reopenDrawerAfterRecreate = drawerOpen;
+        String cur = store.get("theme", "system");
+        boolean darkNow = Ui.DARK;
+        String next = darkNow ? "light" : "dark";
+        store.set("theme", next);
+        android.util.Log.i("DshTheme", cur + " -> " + next + "（当前深色=" + darkNow + "）");
+        Ui.themeDirty = false;
+        recreate();
+        try {
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 长按主题按钮：三档一起给（跟随系统 / 深色 / 浅色）。 */
+    public void openThemePicker() {
+        final String[] keys = {"system", "dark", "light"};
+        String[] labels = {"跟随系统", "深色", "浅色"};
+        new AlertDialog.Builder(this)
+                .setTitle("外观")
+                .setItems(labels, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        store.set("theme", keys[w]);
+                        Ui.themeDirty = false;
+                        reopenDrawerAfterRecreate = drawerOpen;
+                        recreate();
+                        try {
+                            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                })
+                .show();
     }
 
     // ---------------- 抽屉 ----------------

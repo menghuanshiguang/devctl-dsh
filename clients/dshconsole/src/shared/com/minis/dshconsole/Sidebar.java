@@ -42,6 +42,7 @@ public class Sidebar {
         top.addView(t);
         View sp = new View(a);
         top.addView(sp, new LinearLayout.LayoutParams(0, 1, 1f));
+        top.addView(themeBtn());                 // 主题切换：顶上右边
         top.addView(icon("⟳", new Runnable() {
             public void run() {
                 refresh();
@@ -846,6 +847,34 @@ public class Sidebar {
         row.addView(sp, new LinearLayout.LayoutParams(0, 1, 1f));
         if (action != null && action.length() > 0) row.addView(icon(action, r));   // 空动作就不摆按钮
         return row;
+    }
+
+    /**
+     * 主题切换按钮：图标按当前主题给（深色显示 ☀️、浅色显示 🌙）。
+     * 点一下先做一个"转一下 + 缩放"的动画，动画走完再真正换主题（换主题要重建窗口，早换就把动画掐了）。
+     */
+    private TextView themeBtn() {
+        final TextView b = Ui.tv(act, Ui.DARK ? "\u2600" : "\u263D", 16f, Ui.DIM);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(Ui.dp(act, 8), Ui.dp(act, 4), Ui.dp(act, 8), Ui.dp(act, 4));
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                b.animate().rotationBy(180f).scaleX(1.25f).scaleY(1.25f)
+                        .setDuration(140).withEndAction(new Runnable() {
+                            public void run() {
+                                b.animate().rotationBy(0f).scaleX(1f).scaleY(1f).setDuration(0).start();
+                                act.toggleTheme();
+                            }
+                        }).start();
+            }
+        });
+        b.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                act.openThemePicker();               // 长按出三档（跟随系统 / 深色 / 浅色）
+                return true;
+            }
+        });
+        return b;
     }
 
     private TextView icon(String text, final Runnable r) {
