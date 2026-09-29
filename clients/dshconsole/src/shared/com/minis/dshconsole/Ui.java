@@ -86,10 +86,26 @@ public class Ui {
      * 按系统深/浅色刷一遍调色板。Activity 每次重建都会走这里，
      * 所以 uiMode 变化交给系统重建 Activity 即可，视图里不用留任何监听。
      */
+    /** 主题被改过：主界面 onResume 时据此 recreate（颜色是构造时定的，必须重建）。 */
+    public static boolean themeDirty = false;
+
     public static void applyTheme(Context c) {
         android.content.res.Configuration cf = c.getResources().getConfiguration();
-        DARK = (cf.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+        boolean systemDark = (cf.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                 == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        // 主题三档：system / dark / light —— 存在 store 里，Ui 是唯一的取值入口
+        String pref = "system";
+        try {
+            pref = new Store(c).get("theme", "system");
+        } catch (Throwable ignored) {
+        }
+        if ("dark".equals(pref)) {
+            DARK = true;
+        } else if ("light".equals(pref)) {
+            DARK = false;
+        } else {
+            DARK = systemDark;
+        }
         if (DARK) {
             BG = 0xFF000000; SURF = 0xFF26262A; SURF2 = 0xFF2C2C30; SURF3 = 0xFF3A3A3F;
             STROKE = 0xFF38383A; STROKE2 = 0x40545458; PRESS = 0x1FFFFFFF;

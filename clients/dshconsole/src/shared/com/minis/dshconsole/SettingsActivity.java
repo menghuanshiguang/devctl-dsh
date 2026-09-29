@@ -74,6 +74,8 @@ public class SettingsActivity extends Activity {
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
         list = Ui.col(this);
+        list.addView(appearanceRow());           // 外观（跟随系统 / 深色 / 浅色）
+        list.addView(Ui.gap(this, 10));
         if (Cores.get().local()) {                // 本地版才有的卡片，远端版这行不显示
             list.addView(localCard());
             list.addView(Ui.gap(this, 10));
@@ -150,6 +152,53 @@ public class SettingsActivity extends Activity {
     private String deviceLine() {
         if (active == null || active.addr().length() == 0) return "未配对设备";
         return (Cores.get().local() ? "本地 harness · " : "设备 · ") + active.addr();
+    }
+
+    /** 外观：跟随系统 / 深色 / 浅色。改完立刻重建自己（颜色都是构造时定的）。 */
+    private View appearanceRow() {
+        final String cur = themePref();
+        LinearLayout r = Ui.row(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
+        r.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, this));
+        LinearLayout tx = Ui.col(this);
+        tx.addView(Ui.tv(this, "外观", 15.5f, Ui.TEXT));
+        tx.addView(Ui.tv(this, themeLabel(cur), 12f, Ui.MUT));
+        r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.addView(Ui.tv(this, "\u203A", 17f, Ui.MUT));
+        Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
+        r.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                final String[] keys = {"system", "dark", "light"};
+                String[] labels = {"跟随系统", "深色", "浅色"};
+                new AlertDialog.Builder(SettingsActivity.this)
+                        .setTitle("外观")
+                        .setItems(labels, new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                new Store(SettingsActivity.this).set("theme", keys[w]);
+                                Ui.themeDirty = true;               // 主界面回来时自己重建
+                                recreate();                          // 设置页当场重建
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            }
+        });
+        return r;
+    }
+
+    private String themePref() {
+        try {
+            return new Store(this).get("theme", "system");
+        } catch (Throwable t) {
+            return "system";
+        }
+    }
+
+    private String themeLabel(String pref) {
+        if ("dark".equals(pref)) return "深色";
+        if ("light".equals(pref)) return "浅色";
+        return "跟随系统";
     }
 
     /**

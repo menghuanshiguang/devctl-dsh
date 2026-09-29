@@ -597,6 +597,15 @@ public class MainActivity extends Activity {
 
     /** 选图 / 拍照的结果转给聊天页（TabChat 自己发起的选择器）。 */
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (Ui.themeDirty) {                 // 设置页换了主题：颜色都是构造时定的，重建一次
+            Ui.themeDirty = false;
+            recreate();
+        }
+    }
+
+    @Override
     protected void onActivityResult(int req, int res, android.content.Intent data) {
         super.onActivityResult(req, res, data);
         if (req == 4711 && res == RESULT_OK && tabChat instanceof TabChat) {
