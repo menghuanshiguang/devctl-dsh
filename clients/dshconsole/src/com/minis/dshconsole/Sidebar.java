@@ -244,13 +244,11 @@ public class Sidebar {
                     || id.equals(act.store.lastWorkspace(act.dshName));
             String sub = (path.length() > 0 ? path : id) + " · " + kids.length() + " 个会话";
             // 一个工作区 = 一张卡：父行 + 子会话 + 新建入口全收在卡里
-            LinearLayout grp = Ui.col(act);
-            grp.setBackground(Ui.surf(Ui.SURF, Ui.R_CARD, act));
-            int gp = Ui.dp(act, 6);
-            grp.setPadding(gp, gp, gp, gp);
+            LinearLayout grp = Ui.col(act);                          // 扁平树，不套卡
+            grp.setPadding(0, 0, 0, Ui.dp(act, 4));
             LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            glp.bottomMargin = Ui.dp(act, 10);
+            glp.bottomMargin = Ui.dp(act, 6);
             wsBox.addView(grp, glp);
 
             // 点父节点 = 就地展开/收起二次列表（不关抽屉，不然看不到子项）；长按重命名
@@ -328,13 +326,51 @@ public class Sidebar {
     }
 
     /** 二次列表里的子行：左侧缩进，颜色压暗，跟父节点区分开。 */
-    private View subRow(String title, String sub, boolean active, Runnable onClick, Runnable onLong) {
-        LinearLayout wrap = Ui.col(act);
-        wrap.setPadding(Ui.dp(act, 8), 0, 0, 0);                 // 卡内缩进一层，不用 └ 树字符
-        LinearLayout pill = Ui.col(act);
-        if (active) pill.setBackground(Ui.surf(Ui.CHIP_BG, Ui.R_CHIP, act));   // 只有当前会话上蓝底
-        pill.addView(row(title, sub, false, onClick, onLong, active ? Ui.ACCENT : Ui.DIM));
-        wrap.addView(pill);
+    /** 工作区里的会话行：缩进一级 + 前面一个状态圆点 + 时间右对齐（跟主机端一个样）。 */
+    private View subRow(String title, String sub, boolean active, final Runnable onClick, final Runnable onLong) {
+        LinearLayout wrap = Ui.row(act);
+        wrap.setGravity(Gravity.CENTER_VERTICAL);
+        wrap.setMinimumHeight(Ui.dp(act, 44));
+        wrap.setPadding(Ui.dp(act, 20), Ui.dp(act, 6), Ui.dp(act, 6), Ui.dp(act, 6));
+
+        if (onClick != null && !title.startsWith("＋")) {         // 新建入口 / 空态提示不挂圆点
+            View dot = new View(act);
+            android.graphics.drawable.GradientDrawable dg =
+                    new android.graphics.drawable.GradientDrawable();
+            dg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            dg.setColor(active ? Ui.ACCENT : 0xFF3FBF5F);         // 当前会话蓝点，其余绿点
+            dot.setBackground(dg);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(Ui.dp(act, 7), Ui.dp(act, 7));
+            dlp.rightMargin = Ui.dp(act, 10);
+            wrap.addView(dot, dlp);
+        }
+
+        TextView t = Ui.tv(act, title, 13.5f, active ? Ui.ACCENT : Ui.TEXT);
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        wrap.addView(t, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (sub != null && sub.length() > 0) {
+            TextView r = Ui.tv(act, sub, 11f, Ui.MUT);
+            r.setPadding(Ui.dp(act, 10), 0, 0, 0);
+            wrap.addView(r);
+        }
+
+        Ui.press(wrap, act, 0x00000000, Ui.dp(act, 8));           // 无底色，只留按压反馈
+        if (onClick != null) {
+            wrap.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    onClick.run();
+                }
+            });
+        }
+        wrap.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                if (onLong != null) onLong.run();
+                return true;
+            }
+        });
         return wrap;
     }
 
