@@ -272,7 +272,10 @@ public class TabChat extends Tab {
         sendBtn.setLayoutParams(slp);
         sendBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                if (streaming) {
+                // 有内容优先"发"：跑着的时候也能把消息排队/插话送出去（以前跑着只给停止，发不了）
+                if (hasDraft()) {
+                    send();
+                } else if (streaming) {
                     cancel();
                 } else {
                     send();
@@ -280,6 +283,19 @@ public class TabChat extends Tab {
             }
         });
         bar.addView(sendBtn);
+
+        // 输入变化就换按钮语义：有内容 = ↑ 发送；没内容且在跑 = ■ 停止
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            public void afterTextChanged(android.text.Editable e) {
+                refreshSendButton();
+            }
+
+            public void beforeTextChanged(CharSequence c, int a, int b, int d) {
+            }
+
+            public void onTextChanged(CharSequence c, int a, int b, int d) {
+            }
+        });
 
         LinearLayout card = new LinearLayout(act);   // DeepSeek 式：整块独立圆角卡片
         card.setOrientation(LinearLayout.VERTICAL);
@@ -863,10 +879,32 @@ public class TabChat extends Tab {
     }
 
     private void streamingUi(final boolean on) {
+        refreshSendButton();
+    }
+
+    /** 输入框里有没有东西（文字或待发图片）。 */
+    private boolean hasDraft() {
+        return input.getText().toString().trim().length() > 0 || !attachments.isEmpty();
+    }
+
+    /**
+     * 主按钮语义（跟 DeepSeek / harness 一致）：
+     *   有内容           → ↑ 发送（跑着也能发出去，进队列）
+     *   没内容 + 正在跑  → ■ 停止
+     *   没内容 + 空闲    → ↑ 发送
+     */
+    private void refreshSendButton() {
         act.ui(new Runnable() {
             public void run() {
-                sendBtn.setText(on ? "■" : "↑");
-                sendBtn.setBackground(Ui.bg(on ? Ui.RED : Ui.ACCENT, 21, act));
+                boolean has = hasDraft();
+                if (has || !streaming) {
+                    sendBtn.setText("\u2191");
+                    sendBtn.setBackground(Ui.bg(Ui.ACCENT, 21, act));
+                } else {
+                    sendBtn.setText("\u25A0");
+                    sendBtn.setBackground(Ui.bg(Ui.RED, 21, act));
+                }
+                sendBtn.setEnabled(true);
             }
         });
     }
@@ -2076,10 +2114,12 @@ public class TabChat extends Tab {
     private void clearAttachments() {
         attachments.clear();
         renderAttachments();
+        refreshSendButton();
     }
 
     /** 待发图片：一排圆角缩略图，右上角 ✕ 撤掉。 */
     private void renderAttachments() {
+        refreshSendButton();
         if (attStrip == null) return;
         attStrip.removeAllViews();
         if (attachments.isEmpty()) {
