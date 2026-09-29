@@ -181,10 +181,17 @@ public class TabChat extends Tab {
     }
 
     private View chip(String label, final Runnable tap) {
-        TextView t = Ui.tv(act, label, 12.5f, Ui.TEXT);
+        return chip(label, false, tap);
+    }
+
+    /** 胶囊：图标 + 中文短名；active 时用强调色底，一眼看出这个设置被改过。 */
+    private View chip(String label, boolean active, final Runnable tap) {
+        TextView t = Ui.tv(act, label, 12.5f, active ? Ui.ACCENT : Ui.DIM);
         t.setSingleLine(true);
-        t.setPadding(Ui.dp(act, 11), Ui.dp(act, 6), Ui.dp(act, 11), Ui.dp(act, 6));
-        t.setBackground(Ui.bg(Ui.PANEL2, 15, act));
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.setMaxWidth(Ui.dp(act, 132));
+        t.setPadding(Ui.dp(act, 10), Ui.dp(act, 5), Ui.dp(act, 10), Ui.dp(act, 5));
+        t.setBackground(Ui.bg(active ? 0x2E0A84FF : Ui.SURF3, 15, act));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = Ui.dp(act, 6);
@@ -195,44 +202,139 @@ public class TabChat extends Tab {
         return t;
     }
 
+    /** deepseek-v4-flash → V4-flash，太长的 id 不整段塞进胶囊。 */
+    private String shortName(String id) {
+        if (id == null || id.length() == 0) return "";
+        int i = id.indexOf('-');
+        if (i > 0 && id.equals(id.toLowerCase())) {
+            String tail = id.substring(i + 1);
+            return Character.toUpperCase(tail.charAt(0)) + tail.substring(1);
+        }
+        return id;
+    }
+
+    private String effCn(String v) {
+        if (v == null) return "默认";
+        if (v.equals("off")) return "关";
+        if (v.equals("low")) return "轻";
+        if (v.equals("high")) return "深";
+        if (v.equals("max")) return "最深";
+        return v;
+    }
+
+    private String permCn(String v) {
+        if (v == null || v.length() == 0) return "默认";
+        if (v.equals("read-only")) return "只读";
+        if (v.equals("workspace-write")) return "可写工作区";
+        if (v.equals("danger-full-access")) return "完全访问";
+        if (v.equals("auto")) return "自动";
+        return v;
+    }
+
     private void rebuildChips() {
         if (modeBar == null) return;
         modeBar.removeAllViews();
-        modeBar.addView(chip("模式 · " + (curModel.length() == 0 ? "默认" : curModel), new Runnable() {
+        String m = curModel == null || curModel.length() == 0 ? "默认模型" : shortName(curModel);
+        boolean thinkOn = curEffort != null && curEffort.length() > 0
+                && !curEffort.equals("off") && !curEffort.equals("default");
+        boolean locked = curPerm != null && curPerm.startsWith("read-only");
+        modeBar.addView(chip("\u25C8 " + m, false, new Runnable() {
             public void run() { pickModel(); }
         }));
-        modeBar.addView(chip("思考 · " + (curEffort.length() == 0 ? "默认" : curEffort), new Runnable() {
+        modeBar.addView(chip("\u2726 思考 " + effCn(curEffort), thinkOn, new Runnable() {
             public void run() { pickEffort(); }
         }));
-        modeBar.addView(chip("权限 · " + (curPerm.length() == 0 ? "默认" : curPerm), new Runnable() {
+        modeBar.addView(chip("\u26E8 " + permCn(curPerm), locked, new Runnable() {
             public void run() { pickPerm(); }
         }));
     }
 
-    /** 通用暗色选择弹窗：labels 显示、values 回传。 */
+    /** 当前值：靠标题认，省得改三处调用点。 */
+    private String pickCur(String title) {
+        String t = title == null ? "" : title;
+        if (t.contains("模型")) return curModel;
+        if (t.contains("思考")) return curEffort;
+        if (t.contains("权限")) return curPerm;
+        return "";
+    }
+
+    /** 每个选项配一句人话，别让用户对着英文枚举猜。 */
+    private String pickDesc(String title, String v) {
+        if (v == null) return "";
+        String t = title == null ? "" : title;
+        if (t.contains("思考")) {
+            if (v.equals("off")) return "不展开思考";
+            if (v.equals("low")) return "想得少一点，更快";
+            if (v.equals("high")) return "默认深度";
+            if (v.equals("max")) return "想得最久，也最慢";
+        }
+        if (t.contains("权限")) {
+            if (v.equals("read-only")) return "只能读，不改任何文件";
+            if (v.equals("workspace-write")) return "可改当前工作目录里的文件";
+            if (v.equals("danger-full-access")) return "可执行任意命令，风险自负";
+            if (v.equals("auto")) return "交给它自己判断";
+        }
+        return "";
+    }
+
+    /** 底部浮起的选择面板：当前项打勾高亮、带说明，点完自动关。 */
     private void showPick(String title, java.util.List<String> labels, final java.util.List<String> values, final Pick cb) {
+        final String cur = pickCur(title);
         LinearLayout bx = Ui.col(act);
-        bx.setBackground(Ui.bg(Ui.PANEL2, 14, act));
-        int q = Ui.dp(act, 6);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(Ui.PANEL2);
+        bg.setCornerRadius(Ui.dp(act, 18));
+        bx.setBackground(bg);
+        int q = Ui.dp(act, 12);
         bx.setPadding(q, q, q, q);
         TextView h = Ui.tv(act, title, 12f, Ui.DIM);
-        h.setPadding(Ui.dp(act, 10), Ui.dp(act, 8), Ui.dp(act, 10), Ui.dp(act, 6));
+        h.setPadding(Ui.dp(act, 8), Ui.dp(act, 2), Ui.dp(act, 8), Ui.dp(act, 8));
         bx.addView(h);
+
+        final android.app.Dialog d = new android.app.Dialog(act);
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         for (int i = 0; i < labels.size(); i++) {
-            final int idx = i;
-            TextView r = Ui.tv(act, labels.get(i), 14f, Ui.TEXT);
-            r.setSingleLine(false);
-            r.setPadding(Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10));
-            r.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) { cb.pick(values.get(idx)); }
+            final String val = values.get(i);
+            boolean on = val != null && val.equals(cur);
+            LinearLayout row = Ui.col(act);
+            row.setBackground(Ui.bg(on ? 0x2E0A84FF : 0x00000000, 12, act));
+            int rp = Ui.dp(act, 11);
+            row.setPadding(rp, rp, rp, rp);
+            row.addView(Ui.tv(act, (on ? "\u2713  " : "") + labels.get(i), 15f, on ? Ui.ACCENT : Ui.TEXT));
+            String ds = pickDesc(title, val);
+            if (ds.length() > 0) {
+                TextView t2 = Ui.tv(act, ds, 12f, Ui.MUT);
+                t2.setPadding(0, Ui.dp(act, 3), 0, 0);
+                row.addView(t2);
+            }
+            row.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    d.dismiss();
+                    cb.pick(val);
+                }
             });
-            bx.addView(r);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rlp.bottomMargin = Ui.dp(act, 4);
+            bx.addView(row, rlp);
         }
-        final android.widget.PopupWindow pw = new android.widget.PopupWindow(bx,
-                Ui.dp(act, 250), LinearLayout.LayoutParams.WRAP_CONTENT, true);
-        pw.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
-        pw.setOutsideTouchable(true);
-        pw.showAtLocation(modeBar, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, Ui.dp(act, 130));
+        LinearLayout wrap = Ui.col(act);              // 四周留白，面板浮起来而不是贴边
+        int wp2 = Ui.dp(act, 10);
+        wrap.setPadding(wp2, wp2, wp2, Ui.dp(act, 12));
+        wrap.addView(bx);
+        d.setContentView(wrap);
+        android.view.Window win = d.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+            win.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            win.setGravity(Gravity.BOTTOM);
+            android.view.WindowManager.LayoutParams wa = win.getAttributes();
+            wa.dimAmount = 0.45f;
+            win.setAttributes(wa);
+        }
+        d.setCanceledOnTouchOutside(true);
+        d.show();
     }
 
     /** 把原始响应落到应用私有目录（root 可读），用来确认真实字段名，别再来回猜。 */
