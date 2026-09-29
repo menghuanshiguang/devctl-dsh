@@ -934,6 +934,7 @@ public class TabChat extends Tab {
         hostRunning = running;
         streaming = running;                 // 老的 streaming 判断点全部改吃 host 状态
         streamingUi(running);
+        if (!running) dropStale();            // 空闲了还挂着"排队中"就是假的，收掉
         setStateStatus();                    // 每次都拉回 host 口径；瞬时提示活不过一个轮询周期
         logFrame("host-state", (running ? "running" : "idle") + " · " + why);
     }
@@ -1274,7 +1275,13 @@ public class TabChat extends Tab {
             final String msg = err == null ? "" : err.optString("message", err.toString());
             act.ui(new Runnable() {
                 public void run() {
-                    cv.note("错误：" + msg, Ui.RED);
+                    if (benignRace(msg)) {
+                        // 回合一结束，排队里的"插话/撤回"就没意义了 —— 这是竞态，不是故障
+                        cv.note("这条回合已经结束了，插话/撤回不用了", Ui.DIM);
+                        dropStale();
+                    } else {
+                        cv.note("错误：" + msg, Ui.RED);
+                    }
                 }
             });
         }
@@ -1950,6 +1957,15 @@ public class TabChat extends Tab {
         }
     }
 
+    /** host 那几种"来晚了"的报错：回合已经结束/这条已经跑掉，属于竞态，别当故障报。 */
+    private static boolean benignRace(String msg) {
+        String m = msg == null ? "" : msg.toLowerCase();
+        return m.contains("no longer accepts steering")
+                || m.contains("steer-unavailable")
+                || m.contains("queue-item-not-found")
+                || m.contains("sessions.queue");
+    }
+
     /** 打断当前回合（也供侧边栏菜单调用）。 */
     public void cancel() {
         if (sessionId.length() == 0) {
@@ -2250,6 +2266,13 @@ public class TabChat extends Tab {
         }
         if (row.itemId.length() == 0) {
             act.toast("host 还没确认这条，稍等一下");
+            return;
+        }
+        if ("steer".equals(kind) && !hostRunning) {
+            // 回合都没在跑，插进哪儿去 —— 直接收掉这行，别发那条注定被拒的请求
+            queue.remove(row);
+            renderQueue();
+            act.toast("回合已经结束，不用插话了");
             return;
         }
         act.toast("steer".equals(kind) ? "插话中…" : "撤回中…");
