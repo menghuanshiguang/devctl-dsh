@@ -936,7 +936,7 @@ public class TabChat extends Tab {
                         final int attempt = watchTries + 1;
                         act.ui(new Runnable() {
                             public void run() {
-                                cv.note("↻ 连接中断，正在自动重连（漏掉的内容会自动补齐）", Ui.AMBER);
+                                cv.noteQuiet("↻ 连接中断，正在自动重连（漏掉的内容会自动补齐）", Ui.AMBER);
                                 setStatus("连接中断 · 重连中…", Ui.AMBER);
                                 streamingUi(false);          // 绝不把输入框锁死
                             }
@@ -1302,7 +1302,7 @@ public class TabChat extends Tab {
         turnStarted = true;
         final Dsh c = conn;
         if (c == null) {
-            cv.note("未连接，正在重连…", Ui.AMBER);
+            cv.noteQuiet("未连接，正在重连…", Ui.AMBER);
             loadSession(sessionId, sessionTitle);
             return;
         }
