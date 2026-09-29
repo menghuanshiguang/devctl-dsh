@@ -8,9 +8,12 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
+import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -40,6 +43,8 @@ public class SettingsPanelActivity extends Activity {
     private boolean webMode = false;
     private boolean sideHidden = true;
     private String webUrl = "";
+    /** 原版网页拿不到时的原因说明，进结构化视图时当第一张卡显示。 */
+    private String webNotice = null;
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -72,6 +77,23 @@ public class SettingsPanelActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        // 关键：让 WebView 用真正的手机宽度布局（否则 DSH 的桌面版排版会被挤成竖条），
+        // 并锁掉系统字体缩放。
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(true);
+        s.setSupportZoom(true);
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
+        s.setTextZoom(100);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        // 注入脚本的调试点（console.log('[ds]...')）直接进 logcat：adb logcat -s DsWeb
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage m) {
+                Log.i("DsWeb", m.message() + " @" + m.lineNumber());
+                return true;
+            }
+        });
     }
 
     private void mount(View extra) {
@@ -80,9 +102,9 @@ public class SettingsPanelActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT));
         if (extra != null) {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40));
-            lp.gravity = Gravity.TOP | Gravity.END;
-            lp.topMargin = Ui.dp(this, 10);
-            lp.rightMargin = Ui.dp(this, 10);
+            lp.gravity = Gravity.BOTTOM | Gravity.END;
+            lp.bottomMargin = Ui.dp(this, 18);
+            lp.rightMargin = Ui.dp(this, 12);
             root.addView(extra, lp);
         }
     }
@@ -109,8 +131,10 @@ public class SettingsPanelActivity extends Activity {
                     JSONObject w = live.hello == null ? null : live.hello.optJSONObject("web");
                     if (w != null) {
                         int p = w.optInt("port", 0);
-                        if (w.optBoolean("ready", false) && p > 0) base = "http://" + dev.host + ":" + p;
-                        else why = webReason(w.optString("reason", ""));
+                        String url = w.optString("url", "");
+                        if (w.optBoolean("ready", false) && url.length() > 0) base = url;
+                        else if (w.optBoolean("ready", false) && p > 0) base = "http://" + dev.host + ":" + p + "/?token=" + dev.token;
+                        else why = webReason(w.optString("reason", "")) + webTrace(w);
                     }
                 } catch (Throwable ignored) {
                 } finally {
@@ -127,7 +151,9 @@ public class SettingsPanelActivity extends Activity {
                     // host 明确说了「没开」，那就别再猜端口了。
                     ui.post(new Runnable() {
                         public void run() {
-                            if (webMode) Toast.makeText(SettingsPanelActivity.this, "DSH 原版网页：" + reason, Toast.LENGTH_LONG).show();
+                            webNotice = reason;
+                            Toast.makeText(SettingsPanelActivity.this, "DSH 原版网页：" + reason, Toast.LENGTH_LONG).show();
+                            if (!webMode) request(id);
                         }
                     });
                     return;
@@ -135,7 +161,7 @@ public class SettingsPanelActivity extends Activity {
                 if (found != null) {
                     ui.post(new Runnable() {
                         public void run() {
-                            webUrl = found + "/?token=" + dev.token;
+                            webUrl = found.indexOf("token=") >= 0 ? found : found + "/?token=" + dev.token;
                             if (!webMode || web == null) useWeb();
                         }
                     });
@@ -151,6 +177,27 @@ public class SettingsPanelActivity extends Activity {
         if ("discovery-failed".equals(reason)) return "没扫到 DSH 网页服务，检查 host 上的 DSH 网页窗口";
         if ("searching".equals(reason)) return "host 还在找自己的网页服务，等一下再进";
         return "网页窗口没开（" + reason + "）";
+    }
+
+    /** host 顺手带回来的诊断：目标地址 + 扫到过哪些端口。 */
+    private String webTrace(JSONObject w) {
+        String out = "";
+        String t = w.optString("target", "");
+        if (t.length() > 0) out += " · 目标 " + t;
+        org.json.JSONArray seen = w.optJSONArray("seen");
+        if (seen != null && seen.length() > 0) {
+            out += " · 有应答的端口 ";
+            for (int i = 0; i < seen.length(); i++) {
+                JSONObject e = seen.optJSONObject(i);
+                if (e == null) continue;
+                out += (i > 0 ? "," : "") + e.optInt("port", 0) + "(" + e.optInt("status", 0) + ")";
+            }
+        } else {
+            out += " · 扫过的端口一个都没应答";
+        }
+        String u = w.optString("url", "");
+        if (u.length() > 0) out += " · 可直接打开 " + u;
+        return out;
     }
 
     /** 问 host 一句「网页窗口开了没」，开了就切原版页面（失败就留在结构化视图）。 */
@@ -211,27 +258,20 @@ public class SettingsPanelActivity extends Activity {
         web.loadUrl(webUrl);
     }
 
-    /** 装两个页面内小工具：收起原版侧边栏、点中目标分区。 */
+    /** 网页加载完：进设置 → 点目标分区 → 撑成全屏页面。 */
     private void inject() {
-        web.evaluateJavascript(HELPER, null);
-        web.evaluateJavascript(hideJs(), null);
-        String q;
-        try {
-            q = JSONObject.quote(label);
-        } catch (Throwable t) {
-            q = "\"" + label + "\"";
-        }
-        web.evaluateJavascript("__dshPick(" + q + ")", null);
+        web.evaluateJavascript(DsWeb.hideWidgets(), null);
+        DsWeb.apply(web, label);
     }
 
     private String hideJs() {
-        return "__dshSide(" + (sideHidden ? "true" : "false") + ")";
+        return DsWeb.hideWidgets();
     }
 
     /** 右上角小圆钮：显示 / 隐藏原版网页自带的侧边栏。 */
     private View menuBtn() {
         TextView b = new TextView(this);
-        b.setText(sideHidden ? "☰" : "▣");
+        b.setText(sideHidden ? "▣" : "☰");
         b.setTextSize(15f);
         b.setTextColor(Ui.TEXT);
         b.setGravity(Gravity.CENTER);
@@ -240,8 +280,15 @@ public class SettingsPanelActivity extends Activity {
         b.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 sideHidden = !sideHidden;
-                ((TextView) v).setText(sideHidden ? "☰" : "▣");
-                if (web != null) web.evaluateJavascript(hideJs(), null);
+                ((TextView) v).setText(sideHidden ? "▣" : "☰");
+                if (web == null) return;
+                if (sideHidden) {
+                    DsWeb.apply(web, label);
+                    Toast.makeText(SettingsPanelActivity.this, "全屏设置页", Toast.LENGTH_SHORT).show();
+                } else {
+                    DsWeb.restore(web);
+                    Toast.makeText(SettingsPanelActivity.this, "DSH 原版弹层", Toast.LENGTH_SHORT).show();
+                }
             }
         });
         b.setOnLongClickListener(new View.OnLongClickListener() {
@@ -301,6 +348,23 @@ public class SettingsPanelActivity extends Activity {
                 ui.post(new Runnable() {
                     public void run() {
                         if (fp != null) {
+                            if (webNotice != null) {
+                                try {
+                                    org.json.JSONArray blocks = fp.optJSONArray("blocks");
+                                    if (blocks == null) {
+                                        blocks = new org.json.JSONArray();
+                                        fp.put("blocks", blocks);
+                                    }
+                                    JSONObject tip = new JSONObject();
+                                    tip.put("title", "原版网页不可用");
+                                    tip.put("text", webNotice);
+                                    org.json.JSONArray out = new org.json.JSONArray();
+                                    out.put(tip);
+                                    for (int i = 0; i < blocks.length(); i++) out.put(blocks.opt(i));
+                                    fp.put("blocks", out);
+                                } catch (Throwable ignored) {
+                                }
+                            }
                             js("show(" + fp.toString() + ")");
                             return;
                         }
