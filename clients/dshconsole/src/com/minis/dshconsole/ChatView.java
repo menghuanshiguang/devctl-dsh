@@ -1276,6 +1276,8 @@ public class ChatView extends ScrollView {
     /** TabChat \u628a\u300c\u6d88\u606f\u533a\u4e0a\u65b9\u7684\u601d\u8003\u9762\u677f\u300d\u63a5\u8fdb\u6765\uff1a\u6807\u9898\u5bbf\u4e3b + \u6b63\u6587\u5bbf\u4e3b + \u6b63\u6587\u6eda\u52a8\u6761\u3002 */
     public void setTraceHost(View card, LinearLayout headHost, LinearLayout bodyHost, View scroll) {
         traceCard = card;
+        trace = null;                 // 换了宿主：旧轨迹的视图归旧宿主，别再把新内容塞进去
+        traceAnchor = -1;
         traceHeadHost = headHost;
         traceBodyHost = bodyHost;
         traceScrollView = scroll;
@@ -1296,6 +1298,7 @@ public class ChatView extends ScrollView {
             trace.scroll = traceScrollView;
             if (traceCard != null) traceCard.setVisibility(View.VISIBLE);
             if (traceScrollView != null) traceScrollView.setVisibility(View.VISIBLE);
+            trace.box.removeAllViews();          // 先摘下来：head/body 还挂在 box 上，直接 add 会报 has a parent
             traceHeadHost.removeAllViews();
             traceBodyHost.removeAllViews();
             traceHeadHost.addView(trace.head, new LinearLayout.LayoutParams(
