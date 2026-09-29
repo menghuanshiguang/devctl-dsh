@@ -365,7 +365,12 @@ public class MainActivity extends Activity {
         scrim.setAlpha(0f);
         side.animate().translationX(0).setDuration(220).start();
         scrim.animate().alpha(1f).setDuration(220).start();
-        sidebar.refresh();
+        // 数据刷新挪到入场动画之后：动画期间不碰列表，别自己给自己掉帧
+        side.postDelayed(new Runnable() {
+            public void run() {
+                if (drawerOpen) sidebar.refresh();
+            }
+        }, 280);
     }
 
     public void closeDrawer() {

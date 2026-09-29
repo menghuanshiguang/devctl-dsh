@@ -225,7 +225,13 @@ public class Sidebar {
         return root;
     }
 
+    /** 打开抽屉时调用：节流 + 不清空现有内容（清空重建正是掉帧的元凶）。 */
+    private long lastRefreshAt = 0;
+
     public void refresh() {
+        long now = System.currentTimeMillis();
+        if (now - lastRefreshAt < 4000) return;      // 4 秒内刚拉过就别再拉
+        lastRefreshAt = now;
         loadWorkspaces();
         loadSessions();
     }
@@ -233,8 +239,9 @@ public class Sidebar {
     // ---------------- 数据 ----------------
 
     public void loadWorkspaces() {
-        wsBox.removeAllViews();
-        wsBox.addView(row("加载中…", "", false, null, null, Ui.DIM));
+        if (wsBox.getChildCount() == 0) {           // 只有空的时候才放"加载中"，否则保留旧内容
+            wsBox.addView(row("加载中…", "", false, null, null, Ui.DIM));
+        }
         act.bg(new Runnable() {
             public void run() {
                 try {
