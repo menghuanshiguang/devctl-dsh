@@ -1039,6 +1039,13 @@ public class TabChat extends Tab {
         streaming = running;                 // 老的 streaming 判断点全部改吃 host 状态
         streamingUi(running);
         if (!running) dropStale();            // 空闲了还挂着"排队中"就是假的，收掉
+        if (!running) {
+            act.ui(new Runnable() {           // host 说空闲 → 还开着的过程组一律收尾（幂等）
+                public void run() {
+                    cv.thinkEnd();
+                }
+            });
+        }
         setStateStatus();                    // 每次都拉回 host 口径；瞬时提示活不过一个轮询周期
         logFrame("host-state", (running ? "running" : "idle") + " · " + why);
     }
@@ -1527,6 +1534,13 @@ public class TabChat extends Tab {
             return;
         }
         if ("turn-end".equals(kind)) {
+            // 收尾与 turnStarted 无关：app 中途重启/别人开的回合，我们没见过 turn-start，
+            // 但过程组还挂在那儿 —— 不收就会出现"思考早结束了，头上还写思考中"。
+            act.ui(new Runnable() {
+                public void run() {
+                    cv.thinkEnd();
+                }
+            });
             if (turnStarted) {
                 turnStarted = false;
                 final JSONObject rs = data.optJSONObject("reason");
