@@ -81,6 +81,12 @@ public class TabChat extends Tab {
         cvWrap.addView(cv, new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        // 顶部渐隐：消息滚到顶栏底下时淡淡化掉，和顶栏同色收口
+        View fadeTop = new View(act);
+        fadeTop.setBackground(new Ui.FadeBg(Ui.dp(act, 26), Ui.BG, Ui.BG & 0x00FFFFFF));
+        cvWrap.addView(fadeTop, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 26),
+                android.view.Gravity.TOP));
         android.widget.FrameLayout.LayoutParams jlp = new android.widget.FrameLayout.LayoutParams(
                 Ui.dp(act, 40), Ui.dp(act, 40),
                 android.view.Gravity.BOTTOM | android.view.Gravity.END);
