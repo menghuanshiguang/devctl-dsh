@@ -57,7 +57,7 @@ public class Sidebar {
         q.setTextSize(13.5f);
         q.setTextColor(Ui.TEXT);
         q.setHintTextColor(Ui.MUT);
-        q.setBackground(Ui.surf(Ui.SURF2, 12, a));
+        q.setBackground(Ui.bg(Ui.SURF2, 12, a));
         q.setPadding(Ui.dp(a, 14), Ui.dp(a, 9), Ui.dp(a, 14), Ui.dp(a, 9));
         root.addView(q);
         q.addTextChangedListener(new android.text.TextWatcher() {
@@ -97,7 +97,7 @@ public class Sidebar {
         foot.setPadding(0, Ui.dp(a, 6), 0, 0);
         LinearLayout seg = Ui.row(a);                                   // 一整条分段控件，不再是三块砖
         seg.setGravity(Gravity.CENTER_VERTICAL);
-        seg.setBackground(Ui.surf(Ui.SURF2, 9, a));
+        seg.setBackground(Ui.bg(Ui.SURF2, 9, a));
         int sp2 = Ui.dp(a, 3);
         seg.setPadding(sp2, sp2, sp2, sp2);
         seg.addView(footBtn("设备", 3));
@@ -133,7 +133,7 @@ public class Sidebar {
     /** 二级菜单：贴着「设置」行弹出的暗色小面板。 */
     private void settingsMenu(View anchor) {
         LinearLayout box = Ui.col(act);
-        box.setBackground(Ui.surf(Ui.SURF2, Ui.R_CARD, act));
+        box.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, act));
         int p = Ui.dp(act, 6);
         box.setPadding(p, p, p, p);
         box.addView(menuItem("\u65b0\u5efa\u5bf9\u8bdd", "\u5728\u5f53\u524d\u5de5\u4f5c\u533a\u5f00\u65b0\u4f1a\u8bdd", 0));
@@ -345,7 +345,7 @@ public class Sidebar {
             wrap.addView(dot, dlp);
         }
 
-        TextView t = Ui.tv(act, title, 13.5f, active ? Ui.ACCENT : Ui.TEXT);
+        TextView t = Ui.tv(act, title, 13.5f, Ui.TEXT);
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         wrap.addView(t, new LinearLayout.LayoutParams(0,
@@ -357,7 +357,7 @@ public class Sidebar {
             wrap.addView(r);
         }
 
-        Ui.press(wrap, act, 0x00000000, Ui.dp(act, 8));           // 无底色，只留按压反馈
+        Ui.press(wrap, act, active ? Ui.SURF : 0x00000000, Ui.dp(act, 8));   // 选中 = 灰底卡片
         if (onClick != null) {
             wrap.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
@@ -724,13 +724,13 @@ public class Sidebar {
         wrap.setPadding(Ui.dp(act, 14), Ui.dp(act, 8), Ui.dp(act, 14), Ui.dp(act, 8));
         int rr = Ui.dp(act, 16);                                // Minis：会话行圆角 16
         if (active) {
-            wrap.setBackground(Ui.surf(Ui.CHIP_BG, rr, act));    // 选中 = 淡蓝底 + 细蓝边，跟胶囊一套
+            wrap.setBackground(Ui.bg(Ui.SURF, rr, act));   // 选中 = 灰底，不带边线
         } else {
             Ui.press(wrap, act, 0x00000000, rr);                 // 无底色 + 按压涟漪反馈
         }
 
         LinearLayout col = Ui.col(act);
-        TextView t = Ui.tv(act, title, 13.5f, active ? Ui.ACCENT : color);   // 选中行整行转蓝
+        TextView t = Ui.tv(act, title, 13.5f, active ? Ui.TEXT : color);   // 选中行提亮
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         col.addView(t);
@@ -744,7 +744,7 @@ public class Sidebar {
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         if (hold != null && active) {                            // 选中行右侧露个 ⋯，点了就是长按那套动作
-            TextView dots = Ui.tv(act, "⋯", 15f, Ui.ACCENT);
+            TextView dots = Ui.tv(act, "⋯", 15f, Ui.MUT);
             dots.setGravity(Gravity.CENTER);
             dots.setPadding(Ui.dp(act, 10), 0, Ui.dp(act, 2), 0);
             dots.setOnClickListener(new View.OnClickListener() {
