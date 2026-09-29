@@ -74,7 +74,9 @@ public class MainActivity extends Activity {
         }
         installInsets();            // 系统栏内边距 + IME 高度转给聊天页
         store = new Store(this);
-        handlePairIntent(getIntent());          // 扫码/分享进来的配对信息
+        if (b == null) {
+            handlePairIntent(getIntent());      // 只认"全新启动带进来的"那一单，别重放旧 intent
+        }
         // 本地版：环境没装好/没跑起来，先把启用引导摆出来（远端版 hasRuntime() 为 false，永不进这里）
         final LocalEnv env = Cores.get().runtime();
         if (env != null && !(env.ready(this) && env.running(this))) {
@@ -194,6 +196,7 @@ public class MainActivity extends Activity {
     private void handlePairIntent(android.content.Intent it) {
         if (it == null) return;
         try {
+            setIntent(new android.content.Intent());   // 用完即弃：绝不让它下次启动再跑一遍
             String text = null;
             if (android.content.Intent.ACTION_SEND.equals(it.getAction())) {
                 text = it.getStringExtra(android.content.Intent.EXTRA_TEXT);
@@ -739,7 +742,14 @@ public class MainActivity extends Activity {
                 } catch (final Exception e) {
                     ui(new Runnable() {
                         public void run() {
-                            setStatus("连接失败：" + e.getMessage(), Ui.RED);
+                            String m = String.valueOf(e.getMessage());
+                            String low = m.toLowerCase();
+                            if (low.contains("token") || low.contains("unauthorized")) {
+                                // 最常见的一种：配对信息过期/被改过 —— 直接把话说明白
+                                setStatus("连不上：token 不对 · 重新粘贴一次配对命令", Ui.RED);
+                            } else {
+                                setStatus("连接失败：" + m, Ui.RED);
+                            }
                         }
                     });
                     if (loud) toast(e.getMessage());
