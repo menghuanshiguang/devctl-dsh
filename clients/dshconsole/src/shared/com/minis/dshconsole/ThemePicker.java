@@ -98,12 +98,20 @@ final class ThemePicker {
                 }
             }
         });
+        // 关键：窗口尺寸必须在 show() **之前**设好。放在 onShow 里会先按默认尺寸露一帧，
+        // 再跳到正确尺寸 —— 用户看到的就是"弹出来抽一下变位"。
+        final int width = (int) (act.getResources().getDisplayMetrics().widthPixels * 0.86f);
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawable(
+                    new android.graphics.drawable.ColorDrawable(0x00000000));
+            dlg.getWindow().setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
         dlg.setOnShowListener(new android.content.DialogInterface.OnShowListener() {
             public void onShow(android.content.DialogInterface d) {
                 android.view.Window w = dlg.getWindow();
                 if (w == null) return;
+                // 有些 ROM 会在 show 时把 layout 重置一遍，这里再设一次（同值，不会跳）
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
-                int width = (int) (act.getResources().getDisplayMetrics().widthPixels * 0.86f);
                 w.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < card.getChildCount(); i++) {
