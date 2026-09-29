@@ -647,7 +647,7 @@ function webPayload(bridge) {
     reason: web.reason ?? '',
     target: web.origin || bridge.webOrigin || null,
     url: web.url || null,
-    source: web.reason === 'host-service' ? 'host' : web.reason === 'configured' ? 'config' : web.ready ? 'discovered' : 'none',
+    source: web.reason === "host-service" ? "host" : web.reason === "configured" ? "config" : web.reason === "host-web-default" ? "default" : web.ready ? "discovered" : "none",
     seen: Array.isArray(web.seen) ? web.seen.slice(0, 8) : [],
   }
 }

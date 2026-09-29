@@ -70,6 +70,32 @@ function probePort(port, statusPath, probeToken) {
 }
 
 /**
+ * Last resort before admitting defeat: does *anything* speak HTTP on the port
+ * `dsh web` uses by default? The Host web server may answer its own login page
+ * where our marker route is unreachable, and a reachable target beats a 503.
+ */
+function probeHttp(port) {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port, path: '/', method: 'GET', headers: { accept: 'text/html' } },
+      (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode ?? 0))
+      },
+    )
+    req.setTimeout(1200, () => req.destroy())
+    req.on('error', () => resolve(0))
+    req.end()
+  })
+}
+
+/**
+ * `dsh web` binds this port unless told otherwise, so it is the one guess worth
+ * making when every self-identifying probe comes back empty.
+ */
+export const DEFAULT_HOST_WEB_PORT = 3081
+
+/**
  * Find the loopback port the Host web server listens on. Never returns null —
  * `origin` is '' when nothing answered, and `seen` lists every port that spoke
  * HTTP at all (401/404 included) so the phone can show why it failed.
@@ -150,18 +176,26 @@ export function installRemoteWeb({
     }
     if (!searching) {
       searching = discoverHostWeb(statusPath, token)
-        .then((found) => {
+        .then(async (found) => {
           info.seen = found.seen ?? []
-          if (!found.origin) {
-            info.ready = false
-            info.reason = 'host-web-not-found'
-            return ''
+          if (found.origin) {
+            info.origin = found.origin
+            info.ready = true
+            info.reason = 'discovered'
+            log(`web window target ${found.origin} (port ${found.port})`)
+            return info.origin
           }
-          info.origin = found.origin
-          info.ready = true
-          info.reason = 'discovered'
-          log(`web window target ${found.origin} (port ${found.port})`)
-          return info.origin
+          const status = await probeHttp(DEFAULT_HOST_WEB_PORT)
+          if (status > 0) {
+            info.origin = `http://127.0.0.1:${DEFAULT_HOST_WEB_PORT}`
+            info.ready = true
+            info.reason = 'host-web-default'
+            log(`web window target ${info.origin} (dsh web default port, HTTP ${status})`)
+            return info.origin
+          }
+          info.ready = false
+          info.reason = 'host-web-not-found'
+          return ''
         })
         .catch((error) => {
           warn(error)
