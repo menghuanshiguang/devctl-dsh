@@ -1444,7 +1444,7 @@ public class ChatView extends ScrollView {
             head.setTextColor(Ui.MUT);
             head.setTypeface(Typeface.MONOSPACE);
             head.setSingleLine(true);
-            head.setPadding(0, Ui.dp(ctx, 4), 0, Ui.dp(ctx, 4));
+            head.setPadding(Ui.dp(ctx, 8), Ui.dp(ctx, 6), Ui.dp(ctx, 8), Ui.dp(ctx, 6));
             head.setGravity(android.view.Gravity.CENTER_VERTICAL);
             body.setBackground(new Ui.Rail(Ui.STROKE, Ui.dp(ctx, 9), Ui.dp(ctx, 2),
                     Ui.dp(ctx, 10), Ui.dp(ctx, 12)));
@@ -1457,7 +1457,7 @@ public class ChatView extends ScrollView {
                     toggleInPlace(head);
                 }
             });
-            Ui.press(head, ctx, 0x00000000, Ui.R_CHIP);
+            Ui.press(head, ctx, Ui.SURF2, Ui.R_CHIP);      // 表头常驻：思考完也留着，随时可点着折叠
             box.addView(head, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
             box.addView(body, new LinearLayout.LayoutParams(
@@ -1595,6 +1595,9 @@ public class ChatView extends ScrollView {
             if (done) return;
             if (paraTv != null && paraBuf.length() > 0) paraTv.setText(paraBuf);
             done = true;
+            open = false;                                  // 思考结束自动收起，只留表头
+            body.setVisibility(View.GONE);
+            if (bodyWrap != null) bodyWrap.setVisibility(View.GONE);
             refresh();
         }
     }
