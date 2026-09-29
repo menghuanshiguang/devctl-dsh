@@ -64,11 +64,8 @@ public class TabChat extends Tab {
         jump.setTextSize(18);
         jump.setTextColor(Ui.TEXT);
         jump.setGravity(android.view.Gravity.CENTER);
-        jump.setElevation(Ui.dp(act, 6));
         android.graphics.drawable.GradientDrawable jbg =
-                new android.graphics.drawable.GradientDrawable();                // 暗色圆底，不抢内容
-        jbg.setColor(Ui.SURF3);
-        jbg.setCornerRadius(Ui.dp(act, 20));
+                Ui.bg(Ui.BG, 20, act, Ui.STROKE, 1);                             // 和消息同色，仅描一圈细边
         jump.setBackground(jbg);
         jump.setVisibility(android.view.View.GONE);                              // 贴在底部时不出现
         jump.setOnClickListener(new android.view.View.OnClickListener() {
