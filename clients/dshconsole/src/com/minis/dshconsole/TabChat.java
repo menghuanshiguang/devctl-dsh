@@ -91,7 +91,7 @@ public class TabChat extends Tab {
                 Ui.dp(act, 40), Ui.dp(act, 40),
                 android.view.Gravity.BOTTOM | android.view.Gravity.END);
         jlp.rightMargin = Ui.dp(act, 16);
-        jlp.bottomMargin = Ui.dp(act, 66);    // 跟着内容浮到输入卡上方
+        jlp.bottomMargin = Ui.dp(act, 16);
         cvWrap.addView(jump, jlp);
         cv.setFollowCb(new Runnable() {
             public void run() {
@@ -99,10 +99,8 @@ public class TabChat extends Tab {
                         ? android.view.View.GONE : android.view.View.VISIBLE);
             }
         });
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        clp.bottomMargin = -Ui.dp(act, 50);          // 消息区伸进输入卡约三分之一，卡片浮在消息上
-        box.addView(cvWrap, clp);
+        box.addView(cvWrap, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));   // 不用负 margin：会让输入卡被顶起来、下方留死空白
 
         View modeRow = modeStrip();                  // 模式栏搬进输入卡片内部（DeepSeek 式）
 
