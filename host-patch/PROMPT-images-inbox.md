@@ -20,6 +20,14 @@ node --check index.js
 | `sessions.image` | `{sessionId, attachment:{attachmentId,mediaType,bytes,width,height}, size:'thumb'\|'full'}` | `{attachmentId, mediaType, bytes, width, height, size, base64}` |
 | `sessions.inbox` | `{sessionId}` | `{sessionId, asOfSeq, nextTurn:[item], nextStep:[item]}` |
 | `sessions.queue` | `{sessionId, itemId, action:{kind:'remove'\|'steer'\|'edit', text?}}` | `{accepted, itemId, action}` |
+| `sessions.file` | `{sessionId, path}`（绝对或相对会话 cwd） | `{path, attachmentId, mediaType, bytes, width, height}` |
+
+`sessions.file` 是给「agent 把图写盘、回复里只留一个路径」这种场景准备的：
+手机端拿不到 PC 的硬盘，唯一的口子就是它。它只读**会话工作区内**、后缀是
+`.png/.jpg/.jpeg/.webp/.gif` 的文件（越界/非图片/超过 12MB 一律拒绝），
+读完先 `attachments.saveImage()` 落库成附件引用，客户端再照常走 `sessions.image` 取缩略图/原图。
+自测：`node test-workspace-image.mjs`（9 条断言，含 `../` 越界）。
+
 
 `item = {id, source, rpcId?, text, images:[{attachmentId,mediaType,bytes,width,height,name?}]}`
 
@@ -32,7 +40,8 @@ node --check index.js
 ## 3. 自测（不接 UI 也能跑）
 
 ```bash
-node test-image-queue.mjs     # 假 bridge + 假 controller，覆盖 prompt 带图 / image 取字节 / inbox 快照 / queue 三动作
+node test-image-queue.mjs        # prompt 带图 / image 取字节 / inbox 快照 / queue 三动作
+node test-workspace-image.mjs    # sessions.file：工作区内读图 / 越界与非图片被拒
 ```
 
 ## 4. 更新后手机端应该看到什么
@@ -40,3 +49,4 @@ node test-image-queue.mjs     # 假 bridge + 假 controller，覆盖 prompt 带�
 - 空闲时发一条：输入卡上方短暂出现「⌛ 文本 · 已送出 · 等 host 回执」，**约 2 秒内消失**（说明它已经开始跑了）。
 - 回合进行中发一条：那一行**留在坞里**，右侧有「撤回」「⏎ 插话」两个按钮，按 host 的信箱快照走。
 - 带图发送：图片先本地渲染，host 回程的记录里带 `images[]`，滚动回看时按需调 `sessions.image(size:'thumb')` 取缩略图。
+- agent 只给路径（`D:\…\新年大吉-原图-1080x1921.jpg` 或 `![说明](相对路径)`）：手机端会调 `sessions.file` 把这张图取过来显示；取不到时是**文字芯片**，不再是一行乱码。

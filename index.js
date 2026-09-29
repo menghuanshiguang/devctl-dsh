@@ -11,8 +11,9 @@
 import { createServer } from 'node:net'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir, hostname, networkInterfaces } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { svg as qrSvg } from './qr.js'
 import { DEFAULT_WEB_PORT, installRemoteWeb } from './remote-web.js'
 
@@ -467,6 +468,18 @@ async function dispatch(bridge, connection, method, params) {
       const action = queueAction(params.action)
       const value = await controller.updateQueue({ sessionId: params.sessionId, itemId, action })
       return { accepted: value?.accepted === true, itemId, action: action.kind }
+    }
+
+    /**
+     * 读会话工作区里的一个图片文件。
+     * 手机端拿不到 PC 的硬盘：agent 把图写盘后回复里只留一个路径时，客户端靠这条口子取字节。
+     * 读到的字节先落成附件引用再回传 —— 之后照常走 `sessions.image` 取缩略图/原图。
+     */
+    case 'sessions.file': {
+      requireSessionId(params)
+      const rawPath = typeof params.path === 'string' ? params.path : ''
+      if (rawPath.length === 0) throw new BridgeError('bad-request', 'path is required')
+      return readWorkspaceImage(bridge, params.sessionId, rawPath)
     }
 
     /** 信箱快照：手机重新进会话时先要一份当前排队内容，之后靠 inbox 事件增量维护。 */
@@ -1400,6 +1413,55 @@ function imagesOf(content) {
 }
 
 /** 一条排队中的用户消息 → 手机端队列坞站的一行（文本 + 图片元数据 + 对账键）。 */
+/** 可显示的图片后缀 → media type。别的一律不读，避免"顺手读整个盘"。 */
+const IMAGE_EXT = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.gif': 'image/gif',
+}
+/** 单文件上限：超过就让客户端自己想办法，别把桥堵死。 */
+const MAX_WORKSPACE_FILE_BYTES = 12 * 1024 * 1024
+
+/** 会话的工作目录（list 摘要里的 cwd）；问不到就返回空串。 */
+async function sessionCwd(bridge, sessionId) {
+  try {
+    const value = await bridge.ctx.sessionController.list({}, timeoutSignal(CALL_TIMEOUT_MS))
+    const found = (value?.items ?? []).find((one) => (one?.sessionId ?? one?.id) === sessionId)
+    return typeof found?.cwd === 'string' ? found.cwd : ''
+  } catch {
+    return ''
+  }
+}
+
+/** 读一个工作区图片 → 落库成附件引用（客户端随后用 sessions.image 取字节）。 */
+async function readWorkspaceImage(bridge, sessionId, rawPath) {
+  const cwd = await sessionCwd(bridge, sessionId)
+  const abs = normalize(isAbsolute(rawPath) ? rawPath : resolve(cwd || '.', rawPath))
+  if (cwd.length > 0) {
+    const root = normalize(cwd)
+    if (abs !== root && !abs.startsWith(root + sep)) {
+      throw new BridgeError('forbidden', `超出会话工作区：${abs}`)
+    }
+  }
+  const ext = extname(abs).toLowerCase()
+  const mediaType = IMAGE_EXT[ext]
+  if (mediaType === undefined) {
+    throw new BridgeError('bad-request', `不是可显示的图片：${ext === '' ? '(无后缀)' : ext}`)
+  }
+  const info = await stat(abs).catch(() => null)
+  if (info === null || !info.isFile()) throw new BridgeError('not-found', `没有这个文件：${abs}`)
+  if (info.size > MAX_WORKSPACE_FILE_BYTES) {
+    throw new BridgeError('image-too-large', `${info.size} bytes 超过上限`)
+  }
+  const data = await readFile(abs)
+  const store = requireService(bridge, 'attachments')
+  try {
+    const ref = await store.saveImage({ mediaType, data, name: basename(abs) })
+    return { path: abs, ...ref }
+  } catch (error) {
+    throw new BridgeError('unavailable', `图片落库失败：${errorText(error)}`)
+  }
+}
+
 function inboxItem(message) {
   if (message === null || typeof message !== 'object') return { id: '', text: '', images: [] }
   const source = message.source ?? {}
