@@ -1230,7 +1230,7 @@ public class TabChat extends Tab {
                         final int attempt = watchTries + 1;
                         act.ui(new Runnable() {
                             public void run() {
-                                cv.noteQuiet("↻ 连接中断，正在自动重连（漏掉的内容会自动补齐）", Ui.AMBER);
+                                // 重连属于"状态"，不该往消息流里塞 —— 顶栏已经写着"连接中断 · 重连中…"
                                 statusBase = "连接中断 · 重连中…";
                                 setStatus(statusBase, Ui.AMBER);
                                 // 按钮保持最后一次从 host 读到的状态：断线期间猜不出真相，就不猜
@@ -1788,7 +1788,7 @@ public class TabChat extends Tab {
         turnStarted = true;
         final Dsh c = conn;
         if (c == null) {
-            cv.noteQuiet("未连接，正在重连…", Ui.AMBER);
+            setStatus("未连接 · 正在重连…", Ui.AMBER);       // 同上：状态进顶栏，别进对话
             loadSession(sessionId, sessionTitle);
             return;
         }
@@ -1894,10 +1894,11 @@ public class TabChat extends Tab {
                 logSend("verify " + (ok ? "ok" : "未落地"));
                 if (ok) {
                     if (conn == null || !conn.alive()) {          // 消息进了会话，但我们的流可能已经死了
-                        logSend("连接不健康 → 重挂监听");
+                        // 静默重挂：这只是"我们这条流"的健康问题，不该在对话里弹一行吓人
+                        logSend("连接不健康 → 静默重挂监听");
                         act.ui(new Runnable() {
                             public void run() {
-                                cv.note("连接掉了，正在重连…", Ui.AMBER);
+                                setStatus("正在重连…", Ui.AMBER);
                                 loadSession(sessionId, sessionTitle);
                             }
                         });
@@ -1906,7 +1907,7 @@ public class TabChat extends Tab {
                 }
                 act.ui(new Runnable() {
                     public void run() {
-                        cv.note("host 没收到这条（连接半死或被拒），换条连接重发…", Ui.AMBER);
+                        setStatus("host 没收到这条 · 换条连接重发…", Ui.AMBER);   // 状态进顶栏
                     }
                 });
                 resend(params, row);
