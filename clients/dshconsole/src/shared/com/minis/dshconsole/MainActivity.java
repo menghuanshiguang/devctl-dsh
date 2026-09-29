@@ -58,6 +58,11 @@ public class MainActivity extends Activity {
                     android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         }
         store = new Store(this);
+        // 本地版：环境没装好/没跑起来，先把启用引导摆出来（远端版 hasRuntime() 为 false，永不进这里）
+        final LocalEnv env = Cores.get().runtime();
+        if (env != null && !(env.ready(this) && env.running(this))) {
+            startActivity(new android.content.Intent(this, LocalSetupActivity.class));
+        }
         List<Store.Dev> list = store.devices("dsh");
         if (list.isEmpty()) {
             Store.Dev d = new Store.Dev();
@@ -99,6 +104,14 @@ public class MainActivity extends Activity {
 
         select(1);
         connectDsh(false);
+        // 回到上次那个会话（顺带也是调试入口：渲染历史会把可疑原文打进 logcat）
+        try {
+            String last = store.lastSession(dshName);
+            if (last != null && last.length() > 0) {
+                openChat(last, "");
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     // ---------------- 顶栏 ----------------
