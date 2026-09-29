@@ -4,6 +4,8 @@
 set -e
 
 PLUGIN_DIR=${1:-$(cd "$(dirname "$0")/../../.." && pwd)}
+# 本地专用补丁：只绑回环 + 回环免令牌（App 端就不用填令牌了）
+LOCAL_PATCH=${LOCAL_PATCH:-$(cd "$(dirname "$0")" && pwd)/cordis.local.patch.yml}
 ROOT=${ROOT:-$HOME/dsh-local}
 DSH_HOME=${DSH_HOME:-$HOME/.dsh}
 VERSION=${VERSION:-0.2.0-rc.1}
@@ -23,9 +25,9 @@ else
   echo "   ！找不到插件目录，跳过：$PLUGIN_DIR"
 fi
 
-echo "==> 3/4 启动 dsh web（host/port 由 cordis.patch.yml 覆盖，端口 $PORT）"
+echo "==> 3/4 启动 dsh web（绑回环 + 免令牌，端口 $PORT）"
 PATCH=""
-[ -f "$PLUGIN_DIR/cordis.patch.yml" ] && PATCH="--patch $PLUGIN_DIR/cordis.patch.yml"
+[ -f "$LOCAL_PATCH" ] && PATCH="--patch $LOCAL_PATCH"
 # 前台跑，Ctrl-C 停；要看后台就把 nohup 那行打开
 # nohup env DSH_HOME="$DSH_HOME" "$CLI" web $PATCH > "$ROOT/dsh-web.log" 2>&1 &
 DSH_HOME="$DSH_HOME" "$CLI" web $PATCH &
@@ -40,9 +42,7 @@ if [ -f "$STATE" ]; then
     const fs = require("fs")
     const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
     console.log("")
-    console.log("  地址: " + (s.host || "127.0.0.1") + ":" + (s.port || "?"))
-    console.log("  令牌: " + (s.token || ""))
-    console.log("")
+
     console.log("  把这行填进 App → 设置 → 运行模式 → 本地 → 本机地址/令牌：")
     console.log("    " + (s.host || "127.0.0.1") + " | " + (s.port || "") + " | " + (s.token || ""))
   ' "$STATE"

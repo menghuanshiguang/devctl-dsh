@@ -1,0 +1,16 @@
+# 本地模式（harness 与 App 在同一台设备上）专用补丁。
+#
+# 与远端用的 cordis.patch.yml 的区别就两条，都是为了"自己连自己"：
+#   1. host 只绑回环 —— 这台机器上的 harness 不对外网/局域网开端口；
+#   2. allowLocalNoAuth: true —— 回环连接不必再拿令牌（同一台设备，自己鉴自己没意义）。
+#
+# 远端那台**不要**用这个文件：那边绑 0.0.0.0，令牌是必须的。
+- insert:
+    - id: devctl-dsh
+      name: 'devctl-dsh'
+      config:
+        host: '127.0.0.1'
+        port: 7788
+        allowLocalNoAuth: true
+        web:
+          port: 0
