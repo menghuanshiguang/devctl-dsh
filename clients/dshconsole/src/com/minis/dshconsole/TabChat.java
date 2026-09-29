@@ -151,8 +151,8 @@ public class TabChat extends Tab {
 
         LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，同时当阴影的呼吸位
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setPadding(Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10), Ui.dp(act, 10));
-        outer.setBackground(new Ui.ShadowBg(act, 22, 8, 3, 0x24000000, Ui.CARD));   // 一点点软阴影
+        outer.setPadding(Ui.dp(act, 12), Ui.dp(act, 12), Ui.dp(act, 12), Ui.dp(act, 14));
+        outer.setBackground(new Ui.ShadowBg(act, 22, 12, 2, 0x33000000, Ui.CARD));  // 一点点软阴影
         outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
         box.addView(outer);
