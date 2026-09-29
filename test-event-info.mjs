@@ -16,6 +16,7 @@ function grab(decl) {
 const api = new Function([
   'const TRUNCATE_CHARS = 4000;',
   'const QUEUE_TEXT_CHARS = 1200;',
+  'const CONTEXT_TEXT_CHARS = 4000;',
   'function truncate(value, limit = TRUNCATE_CHARS) {',
   '  if (typeof value !== "string") return value;',
   '  return value.length <= limit ? value : `${value.slice(0, limit)}…(+${value.length - limit} chars)`;',
@@ -38,6 +39,9 @@ check('compaction/summary 带 token 数', api.eventInfo('compaction/summary', { 
 check('command/run 取命令名', api.eventInfo('command/run', { command: '/compact' }), { command: '/compact', text: '' })
 check('approval/asked 取工具名', api.eventInfo('approval/asked', { toolName: 'bash', reason: '要跑 rm -rf' }),
   { name: 'bash', text: '要跑 rm -rf' })
+check('request/context 带截断正文（这条分支以前没测到，漏了常量定义）',
+  api.eventInfo('request/context', { message: { content: [{ type: 'text', text: 'x'.repeat(50) }] } }),
+  { text: 'x'.repeat(50) })
 check('未知事件不给字段', api.eventInfo('whatever/happened', { big: 'x'.repeat(100000) }), {})
 console.log(bad === 0 ? '\nALL PASS' : `\n${bad} FAILED`)
 process.exit(bad === 0 ? 0 : 1)

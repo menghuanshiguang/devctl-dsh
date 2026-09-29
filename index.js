@@ -44,6 +44,8 @@ const TAIL_TIMEOUT_MS = 20_000
 const TRUNCATE_CHARS = 4_000
 /** Queue previews stay short: the phone shows one or two lines per row. */
 const QUEUE_TEXT_CHARS = 1_200
+/** 注入的上下文/system/developer 正文转发给手机端时的截断上限（比排队文本宽一些）。 */
+const CONTEXT_TEXT_CHARS = 4_000
 /**
  * Re-encode targets for `sessions.image`. The Host stores a normalized object already, but a
  * full-size photo still base64s past the transport frame, so ask the attachment service for a
