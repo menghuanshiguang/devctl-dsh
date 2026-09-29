@@ -134,9 +134,9 @@ public class ChatView extends ScrollView {
         final String raw = curRaw;
         cur.setText(md(raw));
         markLinks(cur, raw);
-        // 流式期间是逐字改同一个 TextView，塞不进真表格；收尾时按最终文本重建一次，
-        // 让 markdown 表格升级成真 View 表格（否则会一直留着等宽文本表格 + 字面 **）
-        if (hasTable(raw)) {
+        // 流式期间是逐字改同一个 TextView，塞不进真表格 / 代码块；收尾时按最终文本重建一次，
+        // 让 markdown 升级成真 View（否则会一直留着等宽文本表格 + 字面 ** 和裸 ```）
+        if (hasRich(raw)) {
             int idx = col.indexOfChild(cur);
             ViewGroup.LayoutParams lp = cur.getLayoutParams();
             col.removeView(cur);
@@ -589,6 +589,64 @@ public class ChatView extends ScrollView {
         note(text, color, false);
     }
 
+    /**
+     * 本轮失败：把原因摊在对话里。
+     * 以前调用方报错（额度用尽 / 上下文超限 / 空响应）手机上就是「什么都没发生」，
+     * 看着像卡死。这里用 harness 客户端的口径给一条红卡。
+     */
+    public void fail(String message, String code) {
+        dropEmpty();
+        hasContent = true;
+        spacer(Ui.S1);
+        String m = message == null ? "" : message.trim();
+        String c = code == null ? "" : code.trim();
+        String head;
+        if ("QUOTA".equals(c) || "ACCOUNT_QUOTA".equals(c)) {
+            head = "本轮未输出：当前请求的额度已用尽";
+        } else if ("CONTEXT_WINDOW_EXCEEDED".equals(c)) {
+            head = "本轮未输出：上下文超出上限";
+        } else if ("EMPTY_RESPONSE".equals(c)) {
+            head = "本轮未输出：模型返回了空响应";
+        } else if ("RATE_LIMIT".equals(c)) {
+            head = "本轮未输出：请求被限流";
+        } else if ("INVALID_CREDENTIAL".equals(c) || "MISSING_CREDENTIAL".equals(c)) {
+            head = "本轮未输出：密钥无效或缺失";
+        } else {
+            head = "本轮未输出";
+            if (m.length() == 0 && c.length() > 0) head += "：" + c;
+        }
+        LinearLayout card = Ui.col(ctx);
+        card.setBackground(Ui.bg(Ui.TINT_ERR, 10, ctx, Ui.RED, 1));
+        card.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
+        LinearLayout headRow = new LinearLayout(ctx);
+        headRow.setOrientation(LinearLayout.HORIZONTAL);
+        headRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView mark = Ui.tv(ctx, "⚠", Ui.FS_SMALL, Ui.RED);
+        mark.setTypeface(Typeface.MONOSPACE);
+        mark.setPadding(0, 0, Ui.dp(ctx, 6), 0);
+        headRow.addView(mark);
+        TextView t = Ui.tv(ctx, head, Ui.FS_SMALL, Ui.RED);
+        t.setSingleLine(false);
+        headRow.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (c.length() > 0) {
+            TextView badge = Ui.tv(ctx, c, Ui.FS_TINY, Ui.MUT);
+            badge.setTypeface(Typeface.MONOSPACE);
+            headRow.addView(badge);
+        }
+        card.addView(headRow, fullLp());
+        if (m.length() > 0) {
+            TextView body = Ui.tv(ctx, m, Ui.FS_TINY, Ui.DIM);
+            body.setTypeface(Typeface.MONOSPACE);
+            body.setTextIsSelectable(true);
+            LinearLayout.LayoutParams lp = fullLp();
+            lp.topMargin = Ui.dp(ctx, 6);
+            card.addView(body, lp);
+        }
+        col.addView(card, fullLp());
+        spacer(Ui.S2);
+        scroll(false);
+    }
+
     private void note(String text, int color, boolean jump) {
         dropEmpty();
         hasContent = true;
@@ -614,6 +672,8 @@ public class ChatView extends ScrollView {
         col.removeAllViews();
         cur = null;
         curRaw = "";
+        toolItems.clear();          // 工具行跟着会话一起换：不然新会话的结果会落进旧会话的行
+        autoToolId = 0;
         hasContent = false;
         empty();
     }
@@ -697,6 +757,77 @@ public class ChatView extends ScrollView {
         pendEnters.clear();
     }
 
+    // ──────────────── 图片：右对齐（我发的）/ 整宽（工具、别人的）────────────────
+
+    /** 一条消息里的图片。缩略图先用元数据占位，字节从 host 现取，点开看大图。 */
+    public void images(java.util.ArrayList<Img> imgs, boolean mine) {
+        if (imgs == null || imgs.isEmpty()) {
+            return;
+        }
+        dropEmpty();
+        hasContent = true;
+        int size = Ui.dp(ctx, mine ? 138 : 168);
+        LinearLayout row = Ui.row(ctx);
+        row.setGravity(android.view.Gravity.START);
+        for (Img img : imgs) {
+            row.addView(imgThumb(img, size));
+        }
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(ctx);
+        hs.setHorizontalScrollBarEnabled(false);
+        hs.addView(row);
+        if (mine) {
+            endRow(hs);
+        } else {
+            col.addView(hs, fullLp());
+        }
+        scroll(true);
+    }
+
+    private View imgThumb(final Img img, final int size) {
+        android.widget.FrameLayout frame = new android.widget.FrameLayout(ctx);
+        int w = size;
+        int h = size;
+        if (img.width > 0 && img.height > 0) {
+            if (img.width >= img.height) {
+                h = Math.max(Ui.dp(ctx, 64), size * img.height / img.width);
+            } else {
+                w = Math.max(Ui.dp(ctx, 64), size * img.width / img.height);
+            }
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(w, h);
+        lp.rightMargin = Ui.dp(ctx, 6);
+        frame.setLayoutParams(lp);
+
+        final android.widget.ImageView iv = new android.widget.ImageView(ctx);
+        iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+        iv.setClipToOutline(true);
+        iv.setBackground(Ui.bg(Ui.SURF3, 12, ctx));
+        frame.addView(iv, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+
+        final TextView ph = Ui.tv(ctx, img.label().length() > 0 ? img.label() : "图片", 10.5f, Ui.MUT);
+        ph.setGravity(android.view.Gravity.CENTER);
+        frame.addView(ph, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+
+        if (img.bmp != null) {                         // 自己发的图：本地就有，别再去问 host
+            iv.setImageBitmap(img.bmp);
+            ph.setVisibility(View.GONE);
+        } else {
+            img.into(iv, ph);
+        }
+        frame.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (ctx instanceof android.app.Activity) {
+                    Img.view((android.app.Activity) ctx, img);
+                }
+            }
+        });
+        return frame;
+    }
+
     private static final int CELL_MAX = 16;
 
     /**
@@ -704,6 +835,11 @@ public class ChatView extends ScrollView {
      * 流式渲染（等宽文本）与真表格 View 共用这一份扫描逻辑。
      */
     private java.util.ArrayList<java.util.ArrayList<String>> parseTable(String s, int start, int[] end) {
+        return parseTable(s, start, end, null);
+    }
+
+    /** align 可以传 null；非空时按分隔行（{@code :---} / {@code :---:} / {@code ---:}）填 0左/1中/2右。 */
+    private java.util.ArrayList<java.util.ArrayList<String>> parseTable(String s, int start, int[] end, int[] align) {
         java.util.ArrayList<java.util.ArrayList<String>> rows =
                 new java.util.ArrayList<java.util.ArrayList<String>>();
         int seps = 0;
@@ -739,6 +875,14 @@ public class ChatView extends ScrollView {
             }
             if (sep && cells.size() > 0) {
                 seps++;
+                if (align != null) {                       // GFM 的对齐就看分隔行两头的冒号
+                    for (int k = 0; k < cells.size() && k < align.length; k++) {
+                        String c = cells.get(k);
+                        boolean l = c.startsWith(":");
+                        boolean r = c.endsWith(":");
+                        align[k] = (l && r) ? 1 : (r ? 2 : 0);
+                    }
+                }
             } else {
                 rows.add(cells);
             }
@@ -886,7 +1030,7 @@ public class ChatView extends ScrollView {
         return n;
     }
 
-    private View tableView(java.util.ArrayList<java.util.ArrayList<String>> rows) {
+    private View tableView(java.util.ArrayList<java.util.ArrayList<String>> rows, int[] align) {
         int n = Math.max(1, rows.get(0).size());        // 列数以表头为准（否则尾行多余格会冒出幽灵列）
         int[] w = new int[n];
         for (int r = 0; r < rows.size(); r++) {
@@ -935,12 +1079,25 @@ public class ChatView extends ScrollView {
                 }
                 tv.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
                 tv.setMinWidth(0);
+                int al = (align != null && c < align.length) ? align[c] : 0;   // 0左 1中 2右
+                if (al == 1) {
+                    tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                } else if (al == 2) {
+                    tv.setGravity(android.view.Gravity.END);
+                }
                 tv.setTextIsSelectable(true);          // 表格里的字也能长按选中复制
                 float wt = Math.max(3f, Math.min(18f, w[c]));   // 按内容宽定权重：均分会把「值」列挤到换行
                 line.addView(tv, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, wt));
             }
             box.addView(line, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+        // 窄表（≤3 列，如 harness 的 md-table）：撑满气泡、文字换行，别为一点点宽度逼人横滑；
+        // 宽表才交给横滑容器，保持自然宽、不换行。
+        if (n <= 3) {
+            box.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            return box;
         }
         android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(ctx);
         hs.setHorizontalScrollBarEnabled(false);
@@ -950,12 +1107,208 @@ public class ChatView extends ScrollView {
         return hs;
     }
 
+    /**
+     * 找一段围栏代码块：` ```lang ` 起、` ``` ` 收。
+     * out = [块起点, 块结束(含结束行), 正文起点, 正文终点]；没找到返回 false，
+     * 只有开头没有收尾（流式里很常见）就把剩下的都当正文。
+     */
+    private static boolean fenceAt(String s, int from, int[] out) {
+        int i = lineStart(s, Math.max(0, from));
+        while (i < s.length()) {
+            String line = lineOf(s, i);
+            if (isFenceLine(line)) {
+                int codeStart = afterLine(s, i);
+                int j = codeStart;
+                while (j < s.length()) {
+                    int nl = lineStart(s, j);
+                    String l2 = lineOf(s, nl);
+                    if (isFenceLine(l2)) {
+                        int blockEnd = afterLine(s, nl);
+                        int codeEnd = nl;
+                        if (codeEnd > codeStart && s.charAt(codeEnd - 1) == '\n') codeEnd--;
+                        out[0] = i;
+                        out[1] = blockEnd;
+                        out[2] = codeStart;
+                        out[3] = Math.max(codeStart, codeEnd);
+                        return true;
+                    }
+                    int next = s.indexOf('\n', nl);
+                    if (next < 0) break;
+                    j = next + 1;
+                }
+                out[0] = i;
+                out[1] = s.length();
+                out[2] = codeStart;
+                int ce = s.length();
+                if (ce > codeStart && s.charAt(ce - 1) == '\n') ce--;
+                out[3] = Math.max(codeStart, ce);
+                return true;
+            }
+            int next = s.indexOf('\n', i);
+            if (next < 0) return false;
+            i = next + 1;
+        }
+        return false;
+    }
+
+    /** 行首（该行第一个字符的下标）。 */
+    private static int lineStart(String s, int at) {
+        int nl = s.lastIndexOf('\n', Math.max(0, at - 1));
+        return nl < 0 ? 0 : nl + 1;
+    }
+
+    private static String lineOf(String s, int start) {
+        int nl = s.indexOf('\n', start);
+        return nl < 0 ? s.substring(start) : s.substring(start, nl);
+    }
+
+    /** 下一行的行首（跳过本行）。 */
+    private static int afterLine(String s, int start) {
+        int nl = s.indexOf('\n', start);
+        return nl < 0 ? s.length() : nl + 1;
+    }
+
+    private static boolean isFenceLine(String line) {
+        String t = line.trim();
+        return t.startsWith("```") || t.startsWith("~~~");
+    }
+
+    /** 围栏的语言标记（```js 里的 js）。 */
+    private static String langOf(String s, int blockStart) {
+        String t = lineOf(s, blockStart).trim();
+        if (t.startsWith("```")) t = t.substring(3);
+        else if (t.startsWith("~~~")) t = t.substring(3);
+        t = t.trim();
+        int sp = t.indexOf(' ');
+        if (sp > 0) t = t.substring(0, sp);
+        return t;
+    }
+
+    /**
+     * 代码块：顶部一条横幅（语言 + 复制），正文等宽、按 harness 的 pre-wrap 换行。
+     * 手机上没有语法高亮引擎，就不假装高亮——干净等宽比乱着色好读。
+     */
+    private View codeBlock(String lang, final String code) {
+        String text = code == null ? "" : code;
+        LinearLayout box = Ui.col(ctx);
+        box.setBackground(Ui.bg(Ui.SURF2, 12, ctx));
+        box.setClipToOutline(true);                        // 圆角裁切，横幅不会顶出角外
+
+        LinearLayout bar = Ui.row(ctx);
+        bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bar.setBackgroundColor(Ui.SURF3);
+        int bp = Ui.dp(ctx, 10);
+        bar.setPadding(bp, Ui.dp(ctx, 6), bp, Ui.dp(ctx, 6));
+        TextView tag = Ui.tv(ctx, lang == null || lang.length() == 0 ? "code" : lang, 10.5f, Ui.MUT);
+        tag.setTypeface(Typeface.MONOSPACE);
+        tag.setSingleLine(true);
+        tag.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        bar.addView(tag, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        final TextView copy = Ui.tv(ctx, "复制", 11f, Ui.ACCENT);
+        int cp = Ui.dp(ctx, 8);
+        copy.setPadding(cp, Ui.dp(ctx, 2), cp, Ui.dp(ctx, 2));
+        bar.addView(copy, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.addView(bar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView body = Ui.tv(ctx, text, 12.5f, Ui.TEXT);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setLineSpacing(Ui.dp(ctx, 3), 1.0f);
+        body.setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 10), Ui.dp(ctx, 12), Ui.dp(ctx, 12));
+        box.addView(body, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        copy.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                            ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("code", text));
+                    note("代码已复制 · " + text.split("\n").length + " 行", Ui.DIM, true);
+                } catch (Exception e) {
+                }
+            }
+        });
+        return box;
+    }
+
+    /**
+     * 独占一行的 markdown 图片且指向本地图片文件时，返回它的路径（out = 行起止）。
+     * 只认「整行就是 ![](...)」，免得把行内的小图也拆成块。
+     */
+    private String loneImageTarget(String s, int from, int[] out) {
+        int start = lineStart(s, from);
+        if (start < from) return null;
+        String line = lineOf(s, start).trim();
+        if (line.length() < 6 || !line.startsWith("![") || !line.endsWith(")")) return null;
+        int mid = line.indexOf("](");
+        if (mid < 0) return null;
+        String target = line.substring(mid + 2, line.length() - 1).trim();
+        if (target.length() == 0 || isWebUrl(target) || !Img.looksImage(target)) return null;
+        out[0] = start;
+        out[1] = afterLine(s, start);
+        return target;
+    }
+
+    /** host 上的图：缩略图现取（取不到就显示文件名），点开全屏。 */
+    private View hostImage(String path) {
+        Img img = new Img();
+        img.path = path;
+        img.name = baseName(path);
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(ctx);
+        hs.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = Ui.row(ctx);
+        row.addView(imgThumb(img, Ui.dp(ctx, 196)));
+        hs.addView(row);
+        return hs;
+    }
+
+    /** 点开 host 上的图：先落库取字节，取到了就全屏看。 */
+    private void openHostImage(final String path) {
+        final Img img = new Img();
+        img.path = path;
+        img.name = baseName(path);
+        note("正在取图…", Ui.DIM, true);
+        Img.resolve(img, "full", new Img.Cb() {
+            public void done(android.graphics.Bitmap b) {
+                if (b == null) {
+                    note("取不到这张图（host 没读到 / 不是图片 / PC 插件太旧）", Ui.AMBER, true);
+                    return;
+                }
+                Img.put(img, "full", b);
+                if (ctx instanceof android.app.Activity) {
+                    Img.view((android.app.Activity) ctx, img);
+                }
+            }
+        });
+    }
+
+    /** 正文里有没有需要重建成长 View 的东西（真表格 / 代码块）。 */
+    private boolean hasRich(String s) {
+        if (hasTable(s)) return true;
+        if (s == null) return false;
+        if (s.indexOf("```") >= 0) return true;
+        int i = 0;
+        int[] out = new int[2];
+        while (i < s.length()) {                       // 独占一行的本地图片
+            String p = loneImageTarget(s, i, out);
+            if (p != null) return true;
+            int nl = s.indexOf('\n', i);
+            if (nl < 0) return false;
+            i = nl + 1;
+        }
+        return false;
+    }
+
     /** 正文：普通段落与真表格混排；没有表格就退回纯文本路径。 */
     private View richBody(String s, int color) {
         if (s == null) {
             s = "";
         }
-        if (s.indexOf('|') < 0) {
+        if (s.indexOf('|') < 0 && s.indexOf("```") < 0) {
             return plainBody(s, color);
         }
         LinearLayout box = new LinearLayout(ctx);
@@ -965,7 +1318,39 @@ public class ChatView extends ScrollView {
         int i = 0;
         boolean any = false;
         while (i < s.length()) {
-            java.util.ArrayList<java.util.ArrayList<String>> rows = parseTable(s, i, end);
+            int[] lone = new int[2];
+            String lonePath = loneImageTarget(s, i, lone);     // 独占一行的 ![说明](本地图) → 直接出图
+            if (lonePath != null) {
+                if (buf.length() > 0) {
+                    box.addView(plainBody(buf.toString(), color));
+                    buf.setLength(0);
+                }
+                LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                ilp.topMargin = Ui.dp(ctx, 8);
+                ilp.bottomMargin = Ui.dp(ctx, 8);
+                box.addView(hostImage(lonePath), ilp);
+                any = true;
+                i = lone[1] > i ? lone[1] : afterLine(s, i);
+                continue;
+            }
+            int[] fence = new int[4];
+            if (fenceAt(s, i, fence)) {                       // ```lang ... ``` → 真代码块
+                if (buf.length() > 0) {
+                    box.addView(plainBody(buf.toString(), color));
+                    buf.setLength(0);
+                }
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                clp.topMargin = Ui.dp(ctx, 8);
+                clp.bottomMargin = Ui.dp(ctx, 8);
+                box.addView(codeBlock(langOf(s, fence[0]), s.substring(fence[2], fence[3])), clp);
+                any = true;
+                i = fence[1] > i ? fence[1] : afterLine(s, i);   // 防呆：绝不允许原地打转
+                continue;
+            }
+            int[] align = new int[64];
+            java.util.ArrayList<java.util.ArrayList<String>> rows = parseTable(s, i, end, align);
             if (rows != null) {
                 if (buf.length() > 0) {
                     box.addView(plainBody(buf.toString(), color));
@@ -975,7 +1360,7 @@ public class ChatView extends ScrollView {
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 lp.topMargin = Ui.dp(ctx, 6);
                 lp.bottomMargin = Ui.dp(ctx, 6);
-                box.addView(tableView(rows), lp);
+                box.addView(tableView(rows, align), lp);
                 any = true;
                 i = end[0];
                 continue;
@@ -1100,8 +1485,10 @@ public class ChatView extends ScrollView {
             int b = s.indexOf("**", i);
             int c = s.indexOf('`', i);
             int k = s.indexOf("~~", i);
+            int m = imgAt(s, i);
             int l = linkAt(s, i);
             int u = urlAt(s, i);
+            int f = pathAt(s, i);
             int best = -1;
             if (b >= 0) {
                 best = b;
@@ -1118,9 +1505,34 @@ public class ChatView extends ScrollView {
             if (u >= 0 && (best < 0 || u < best)) {
                 best = u;
             }
+            if (f >= 0 && (best < 0 || f < best)) {
+                best = f;
+            }
             if (best < 0) {
                 out.append(s.substring(i));
                 return;
+            }
+            if (best == m) {                                  // ![说明](目标) → 图片行
+                int mid = s.indexOf("](", m);
+                int end = s.indexOf(')', mid + 2);
+                out.append(s.substring(i, m));
+                int ms = out.length();
+                String alt = s.substring(m + 2, mid);
+                String target = s.substring(mid + 2, end);
+                out.append("\uD83D\uDDBC " + (alt.trim().length() > 0 ? alt.trim() : baseName(target)));
+                mediaChip(out, ms, out.length(), target, alt);
+                i = end + 1;
+                continue;
+            }
+            if (best == f) {                                  // 文件路径 → 文件芯片（点一下复制路径）
+                int e = f;
+                while (e < s.length() && isPathChar(s.charAt(e))) e++;
+                out.append(s.substring(i, f));
+                int fs = out.length();
+                out.append(s.substring(f, e));
+                fileLink(out, fs, out.length(), s.substring(f, e));
+                i = e;
+                continue;
             }
             if (best == l) {                                  // [文字](链接)
                 int mid = s.indexOf("](", l);
@@ -1163,15 +1575,155 @@ public class ChatView extends ScrollView {
             } else {
                 out.setSpan(new android.text.style.TypefaceSpan("monospace"), st, out.length(), 0);
                 out.setSpan(new android.text.style.ForegroundColorSpan(Ui.AMBER), st, out.length(), 0);
+                // 行内代码里装的就是个链接（harness 也这么干）→ 顺手让它能点
+                String inner = out.subSequence(st, out.length()).toString().trim();
+                if (isWebUrl(inner)) {
+                    link(out, st, out.length(), inner);
+                } else if (Img.looksImage(inner)) {
+                    final String ip = inner;                 // `D:\\a\\b.jpg` 这种：点一下去 host 取
+                    out.setSpan(new android.text.style.ClickableSpan() {
+                        @Override
+                        public void onClick(View v) {
+                            openHostImage(ip);
+                        }
+                        @Override
+                        public void updateDrawState(android.text.TextPaint ds) {
+                            ds.setUnderlineText(false);
+                        }
+                    }, st, out.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
             }
             i = e + mark.length();
         }
     }
 
-    /** 正文里有没有可点的链接（没链接就保持原来的长按选词）。 */
+    /** 正文里有没有可点的东西（没有就保持原来的长按选词）。 */
     static boolean hasLink(String s) {
         return s != null && (s.indexOf("http://") >= 0 || s.indexOf("https://") >= 0
-                || s.indexOf("](") >= 0);
+                || s.indexOf("](") >= 0 || pathAt(s, 0) >= 0);
+    }
+
+    /** 文件路径的字符集（比 URL 窄，别把中文和标点吃进来）。 */
+    private static boolean isPathChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '/' || c == '\\' || c == '.' || c == '_'
+                || c == '-' || c == '~' || c == ':' || c == '+';
+    }
+
+    /** 找一处文件路径起点（相对/绝对，可带 :行号）；找不到返回 -1。 */
+    private static int pathAt(String s, int from) {
+        for (int i = Math.max(0, from); i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!(Character.isLetter(c) || c == '/' || c == '~')) continue;
+            if (i > 0) {                              // 紧跟在路径字符后面的不算起点（说明是中途）
+                char pv = s.charAt(i - 1);
+                if (Character.isLetterOrDigit(pv) || pv == '/' || pv == '.' || pv == '_'
+                        || pv == '-' || pv == '~') continue;
+            }
+            int e = i;
+            while (e < s.length() && isPathChar(s.charAt(e))) e++;
+            if (e - i < 3) continue;
+            String tok = s.substring(i, e);
+            int cut = tok.indexOf(':');
+            String p = cut > 0 ? tok.substring(0, cut) : tok;
+            if (cut > 0 && !isLineSuffix(tok.substring(cut + 1))) continue;
+            if (p.indexOf('/') < 0 && p.indexOf('\\') < 0) continue;   // 得像个路径（也认 Windows 的反斜杠）
+            int slash = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+            int dot = p.lastIndexOf('.');
+            if (dot <= slash || dot == p.length() - 1 || p.length() - dot > 7) continue;   // 还要有扩展名
+            return i;
+        }
+        return -1;
+    }
+
+    /** :12 / :12:5 / :12-30 都算行号后缀。 */
+    private static boolean isLineSuffix(String s) {
+        if (s.length() == 0) return false;
+        int dash = s.indexOf('-');
+        if (dash > 0) s = s.substring(0, dash);
+        int colon = s.indexOf(':');
+        if (colon > 0) s = s.substring(0, colon);
+        if (s.length() == 0) return false;
+        for (int i = 0; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    /** 文件芯片：等宽 + 正文色，点一下复制路径（手机上没有 host 的工作区可翻，复制最实用）。 */
+    private void fileLink(android.text.SpannableStringBuilder out, int st, int en, final String path) {
+        if (en <= st) return;
+        out.setSpan(new android.text.style.TypefaceSpan("monospace"), st, en, 0);
+        out.setSpan(new android.text.style.ForegroundColorSpan(Ui.TEXT), st, en, 0);
+        out.setSpan(new android.text.style.ClickableSpan() {
+            @Override
+            public void onClick(View v) {
+                copyPath(path);
+            }
+            @Override
+            public void updateDrawState(android.text.TextPaint ds) {
+                ds.setUnderlineText(false);
+            }
+        }, st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    private void copyPath(String path) {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("path", path));
+            note("路径已复制 · " + path, Ui.DIM, true);
+        } catch (Exception e) {
+        }
+    }
+
+    /** 找 ![说明](目标) 的起点；没有返回 -1。 */
+    private static int imgAt(String s, int from) {
+        int p = s.indexOf("![", from);
+        while (p >= 0) {
+            int mid = s.indexOf("](", p);
+            if (mid > 0 && s.indexOf(')', mid + 2) > 0) {
+                return p;
+            }
+            p = s.indexOf("![", p + 2);
+        }
+        return -1;
+    }
+
+    private static String baseName(String path) {
+        if (path == null) return "图片";
+        int cut = path.lastIndexOf('/');
+        String b = cut >= 0 ? path.substring(cut + 1) : path;
+        int q = b.indexOf('?');
+        if (q > 0) b = b.substring(0, q);
+        return b.length() == 0 ? "图片" : b;
+    }
+
+    /**
+     * 图片行：手机端拿不到 host 工作区的字节（协议没有读文件的口子），所以做成可点的芯片 ——
+     * http(s) 的交给浏览器打开，本地路径的点一下复制。绝不把 ![]() 拆成满屏乱码。
+     */
+    private void mediaChip(android.text.SpannableStringBuilder out, int st, int en, final String target,
+                           final String alt) {
+        if (en <= st) return;
+        boolean web = isWebUrl(target);
+        out.setSpan(new android.text.style.ForegroundColorSpan(web ? Ui.ACCENT : Ui.TEXT), st, en, 0);
+        out.setSpan(new android.text.style.ClickableSpan() {
+            @Override
+            public void onClick(View v) {
+                if (isWebUrl(target)) {
+                    openLink(target);
+                } else if (Img.looksImage(target)) {
+                    openHostImage(target);            // host 上的图：落库 → 取字节 → 全屏看
+                } else {
+                    copyPath(target);
+                    note("图片在 host 上：" + target, Ui.DIM, true);
+                }
+            }
+            @Override
+            public void updateDrawState(android.text.TextPaint ds) {
+                ds.setUnderlineText(false);
+            }
+        }, st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
     /** 找 [文字](url) 的起点；没有返回 -1。 */
@@ -1187,11 +1739,23 @@ public class ChatView extends ScrollView {
         return -1;
     }
 
-    /** 找裸链接（http:// / https://）的起点；前面紧挨着字母数字的（如 xhttp://）不算。 */
+    /** 找裸链接（http(s):// 或 mailto:）的起点；前面紧挨着字母数字的（如 xhttp://）不算。 */
     private static int urlAt(String s, int from) {
-        int p = s.indexOf("http", from);
+        int a = schemeAt(s, from, "http");
+        int b = schemeAt(s, from, "mailto:");
+        if (a < 0) {
+            return b;
+        }
+        if (b < 0) {
+            return a;
+        }
+        return Math.min(a, b);
+    }
+
+    private static int schemeAt(String s, int from, String key) {
+        int p = s.indexOf(key, from);
         while (p >= 0) {
-            boolean ok = s.startsWith("http://", p) || s.startsWith("https://", p);
+            boolean ok = key.endsWith(":") || s.startsWith("http://", p) || s.startsWith("https://", p);
             if (ok && p > 0) {
                 char pv = s.charAt(p - 1);
                 ok = !(Character.isLetterOrDigit(pv) || pv == '_' || pv == '.' || pv == '/');
@@ -1199,18 +1763,30 @@ public class ChatView extends ScrollView {
             if (ok) {
                 return p;
             }
-            p = s.indexOf("http", p + 4);
+            p = s.indexOf(key, p + key.length());
         }
         return -1;
+    }
+
+    /** 真能交给系统打开的协议；其余（本地路径）走文件芯片。 */
+    private static boolean isWebUrl(String u) {
+        if (u == null) return false;
+        String l = u.toLowerCase();
+        return l.startsWith("http://") || l.startsWith("https://") || l.startsWith("mailto:")
+                || l.startsWith("tel:") || l.startsWith("ftp://");
     }
 
     private static boolean isUrlStop(char ch) {
         return ch == ' ' || ch == '\t' || ch == '<' || ch == '>' || ch == '"' || ch == '\u3000';
     }
 
-    /** 给 [st,en) 打上可点链接。 */
+    /** 给 [st,en) 打上可点链接；目标是本地路径的话做成文件芯片（点一下复制路径）。 */
     private void link(android.text.SpannableStringBuilder out, int st, int en, final String url) {
         if (en <= st || url.length() == 0) {
+            return;
+        }
+        if (!isWebUrl(url)) {
+            fileLink(out, st, en, url);
             return;
         }
         out.setSpan(new android.text.style.ClickableSpan() {
@@ -1487,14 +2063,14 @@ public class ChatView extends ScrollView {
     /** \u5de5\u5177\u8c03\u7528\uff1a\u5728\u8f68\u8ff9\u91cc\u843d\u4e00\u884c\u300c\u56fe\u6807 + \u4e2d\u6587\u6458\u8981\u300d\uff0c\u70b9\u8fd9\u884c\u770b\u53c2\u6570\u3002 */
     public void tool(String name, String args) {
         thinkStart();
-        trace.toolRow(name, args);
+        tool(null, name, args);
         scroll(false);
     }
 
     /** \u5de5\u5177\u7ed3\u679c\uff1a\u585e\u8fdb\u4e0a\u4e00\u884c\u5de5\u5177\u884c\u7684\u8be6\u60c5\u91cc\uff1b\u6ca1\u6709\u5bf9\u5e94\u884c\u5c31\u81ea\u5df1\u843d\u4e00\u884c\u3002 */
     public void toolResult(String text, boolean err) {
         if (traceLive() == null) thinkStart();
-        trace.result(text, err);
+        toolResult(null, text, err, false);
         scroll(false);
     }
 
@@ -1563,27 +2139,63 @@ public class ChatView extends ScrollView {
     }
 
     /** \u4e00\u6761\u8f68\u8ff9\uff1a\u53ef\u6298\u53e0\u6807\u9898 + \u7ad6\u8f68\u6b63\u6587\uff08\u601d\u8003\u6bb5\u843d / \u5de5\u5177\u884c\u6df7\u6392\uff09\u3002 */
+    /**
+     * 一条轨迹：表头 + 竖轨正文（思考段落 / 工具行混排）。
+     *
+     * 对齐 harness 客户端 ui-chat/ReasoningRow：
+     *  · 折叠摘要取「最新一段的首行」（latestCompletedParagraphFirstLine），
+     *    不是字数、不是尾行、也不是往上滚的截尾；摘要里剥掉 ** 标记；
+     *  · 结束时摘要换成全文首行（harness 的 settled 行为）；
+     *  · 正文不截尾（harness 展开就是全文），只做刷新节流，免得每帧 setText 把点击打断。
+     */
     private class Trace {
         final LinearLayout box = Ui.col(ctx);
+        final LinearLayout headerRow = new LinearLayout(ctx);
+        final TextView hMark = new TextView(ctx);
+        final TextView hTitle = new TextView(ctx);
+        final TextView hPrev = new TextView(ctx);
+        final TextView hCare = new TextView(ctx);
         final LinearLayout body = Ui.col(ctx);
-        final TextView head = new TextView(ctx);
+        final TextView head = new TextView(ctx);            // 兼容旧引用（不再挂到树上）
         final StringBuilder paraBuf = new StringBuilder();
         final long at = System.currentTimeMillis();
+        long endAt;
+        final java.util.ArrayList<ToolItem> items = new java.util.ArrayList<ToolItem>();
+        final java.util.LinkedHashMap<String, Integer> cats = new java.util.LinkedHashMap<String, Integer>();
         int tools, paras;
-        boolean done, open = true, lastTool;
+        long lastPaint;
+        boolean done, open = false, lastTool;
+        ThinkRow curThink;
         TextView paraTv;
         View bodyWrap, scroll;
 
         Trace() {
-            head.setTextSize(Ui.FS_SMALL);
-            head.setTextColor(Ui.MUT);
-            head.setTypeface(Typeface.MONOSPACE);
-            head.setSingleLine(true);
-            head.setPadding(Ui.dp(ctx, 8), Ui.dp(ctx, 6), Ui.dp(ctx, 8), Ui.dp(ctx, 6));
-            head.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            body.setBackground(new Ui.Rail(Ui.STROKE, Ui.dp(ctx, 9), Ui.dp(ctx, 2),
-                    Ui.dp(ctx, 10), Ui.dp(ctx, 12)));
-            head.setOnClickListener(new View.OnClickListener() {
+            box.setBackgroundColor(0x00000000);      // harness 的过程行不套卡片：直接长在消息底色上
+            box.setPadding(0, 0, 0, 0);
+            headerRow.setOrientation(LinearLayout.HORIZONTAL);
+            headerRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            headerRow.setPadding(0, Ui.dp(ctx, 2), 0, Ui.dp(ctx, 2));
+            hMark.setTextSize(Ui.FS_SMALL);
+            hMark.setTypeface(Typeface.MONOSPACE);
+            hMark.setPadding(0, 0, Ui.dp(ctx, 6), 0);
+            headerRow.addView(hMark);
+            hTitle.setTextSize(Ui.FS_SMALL);
+            hTitle.setTypeface(Typeface.MONOSPACE);
+            hTitle.setSingleLine(true);
+            headerRow.addView(hTitle);
+            hPrev.setTextSize(Ui.FS_SMALL);
+            hPrev.setTextColor(Ui.DIM);
+            hPrev.setSingleLine(true);
+            hPrev.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            hPrev.setPadding(Ui.dp(ctx, 8), 0, Ui.dp(ctx, 6), 0);
+            headerRow.addView(hPrev, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            hCare.setTextSize(Ui.FS_SMALL);
+            hCare.setTextColor(Ui.MUT);
+            hCare.setTypeface(Typeface.MONOSPACE);
+            headerRow.addView(hCare);
+            body.setPadding(Ui.dp(ctx, 2), Ui.dp(ctx, 2), 0, 0);
+            headerRow.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     open = !open;
                     body.setVisibility(open ? View.VISIBLE : View.GONE);
@@ -1593,11 +2205,11 @@ public class ChatView extends ScrollView {
                         jumpBody();                   // 再展开：回到思考内容最底部（最新流式输出）
                     }
                     refresh();
-                    toggleInPlace(head);
+                    toggleInPlace(headerRow);
                 }
             });
-            Ui.press(head, ctx, Ui.SURF2, Ui.R_CHIP);      // 表头常驻：思考完也留着，随时可点着折叠
-            box.addView(head, new LinearLayout.LayoutParams(
+            Ui.press(headerRow, ctx, 0x00000000, Ui.R_CHIP);
+            box.addView(headerRow, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
             Ui.MaxScroll frame = new Ui.MaxScroll(ctx);           // 大框：表头是框顶盖，流式思考只在框内滚
             frame.maxH = Ui.dp(ctx, 280);
@@ -1608,15 +2220,151 @@ public class ChatView extends ScrollView {
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
             bodyWrap = frame;
             scroll = frame;
+            // 默认收起（harness 标准模式：过程组正文初始收起，实时状态写在组头那一行）
+            body.setVisibility(open ? View.VISIBLE : View.GONE);
+            frame.setVisibility(open ? View.VISIBLE : View.GONE);
             refresh();
         }
 
         void refresh() {
-            String s;
-            if (!done) s = paras > 0 ? "\u601d\u8003\u4e2d\u2026" : "\u8c03\u7528\u5de5\u5177\u4e2d\u2026";
-            else if (paras > 0) s = "\u5df2\u601d\u8003\uff08\u7528\u65f6 " + (int) Math.max(1, (System.currentTimeMillis() - at + 999) / 1000) + " \u79d2\uff09";
-            else s = "\u5de5\u5177\u8c03\u7528 \u00d7" + tools;
-            head.setText(s + (open ? "  \u25be" : "  \u25b8"));
+            paintHead();
+        }
+
+        /**
+         * 组头：照 harness 的过程组规则 —— 运行中写「当前活动」，结算后写「前三个类别」（不带次数）。
+         * 图标始终是类别的业务图标，运行中整行走一道高光（TextShimmer）。
+         */
+        void paintHead() {
+            boolean run = !done;
+            String act = run ? runningActivity() : topActivity();
+            boolean thinking = "thinking".equals(act);
+            hMark.setText(thinking ? "\u2726" : toolIcon(act));
+            hMark.setTextColor(thinking ? (run ? Ui.AMBER : Ui.MUT) : toolColor(act));
+            String label;
+            if (run) {
+                label = thinking ? "\u601D\u8003\u4E2D"
+                        : (runningPreparing() ? "\u51C6\u5907" + toolTitle(act) : toolTitle(act));
+            } else {
+                label = closedTitle();
+            }
+            hTitle.setText(label);
+            hTitle.setTextColor(run ? Ui.MUT : Ui.DIM);
+            if (run) {
+                Ui.shimmer(hTitle, Ui.MUT, Ui.TEXT);
+            } else {
+                Ui.stopShimmer(hTitle);
+            }
+            String detail;
+            if (run) {
+                detail = liveDetail();
+            } else {
+                long secs = Math.max(1, ((endAt > 0 ? endAt : System.currentTimeMillis()) - at + 999) / 1000);
+                detail = "\u7528\u65F6 " + secs + " \u79D2";
+            }
+            hPrev.setText(detail);
+            if (run) {
+                Ui.shimmer(hPrev, Ui.DIM, Ui.TEXT);
+            } else {
+                Ui.stopShimmer(hPrev);
+            }
+            hCare.setText(open ? "\u25BE" : "\u25B8");
+        }
+
+        /** 正在跑的类别：有工具在跑就是它，否则算思考。 */
+        String runningActivity() {
+            for (int i = items.size() - 1; i >= 0; i--) {
+                ToolItem it = items.get(i);
+                if (it.phase <= 1) return toolVariant(it.name);
+            }
+            return "thinking";
+        }
+
+        boolean runningPreparing() {
+            for (int i = items.size() - 1; i >= 0; i--) {
+                if (items.get(i).phase == 0) return true;
+            }
+            return false;
+        }
+
+        /** 类别按次数排序，次数一样就按出现先后（harness 的 processActivity）。 */
+        java.util.ArrayList<String> ranked() {
+            java.util.ArrayList<String> keys =
+                    new java.util.ArrayList<String>(cats.keySet());
+            final java.util.HashMap<String, Integer> c = cats;
+            java.util.Collections.sort(keys, new java.util.Comparator<String>() {
+                public int compare(String a, String b) {
+                    return c.get(b) - c.get(a);        // 稳定排序：平手保持插入顺序
+                }
+            });
+            return keys;
+        }
+
+        String topActivity() {
+            java.util.ArrayList<String> r = ranked();
+            return r.isEmpty() ? "thinking" : r.get(0);
+        }
+
+        /** 结算后的组名：前三个类别，用「、」串起来；没有工具就写「思考」。 */
+        String closedTitle() {
+            java.util.ArrayList<String> r = ranked();
+            if (r.isEmpty()) return "\u601D\u8003";
+            StringBuilder sb = new StringBuilder();
+            int n = Math.min(3, r.size());
+            for (int i = 0; i < n; i++) {
+                if (i > 0) sb.append("\u3001");
+                sb.append(toolTitle(r.get(i)));
+            }
+            if (r.size() > 3) sb.append("\u7B49");
+            return sb.toString();
+        }
+
+        /** 运行中的实时详情：工具在跑就给它的摘要，否则给最新一段思考的首行。 */
+        String liveDetail() {
+            for (int i = items.size() - 1; i >= 0; i--) {
+                ToolItem it = items.get(i);
+                if (it.phase <= 1) return it.summary();
+            }
+            return preview();
+        }
+
+        /** harness latestCompletedParagraphFirstLine：最后一段首行写完了才认它，否则退回上一段。 */
+        String preview() {
+            if (curThink == null) return "";
+            return curThink.preview(done);
+        }
+
+        String oldPreview() {
+            if (paraBuf.length() == 0) return "";
+            String s = done ? paraBuf.toString() : trimEnd(paraBuf.toString());
+            if (s.length() == 0) return "";
+            String para;
+            if (done) {
+                para = s;                                   // 结束：全文首行
+            } else {
+                int cut = s.lastIndexOf("\n\n");
+                para = cut >= 0 ? s.substring(cut + 2) : s;
+                int nl = para.indexOf('\n');
+                if (cut >= 0 && nl < 0) {                    // 最后一段还没写完 → 用上一段的首行
+                    int prev = s.lastIndexOf("\n\n", cut - 1);
+                    String prevPara = prev >= 0 ? s.substring(prev + 2, cut) : s.substring(0, cut);
+                    if (prevPara.trim().length() > 0) para = prevPara;
+                }
+            }
+            int nl = para.indexOf('\n');
+            String line = (nl < 0 ? para : para.substring(0, nl)).trim();
+            line = line.replace("**", "").replaceAll("\\s+", " ").trim();
+            if (line.length() > 32) line = line.substring(0, 32) + "\u2026";
+            return line;
+        }
+
+        private String trimEnd(String s) {
+            int e = s.length();
+            while (e > 0) {
+                char c = s.charAt(e - 1);
+                if (c == '\n' || c == ' ' || c == '\t' || c == '\r') e--;
+                else break;
+            }
+            return s.substring(0, e);
         }
 
         /** 展开大框时拉到底：看最新流式输出，而不是每次都从头重看。 */
@@ -1642,7 +2390,7 @@ public class ChatView extends ScrollView {
             });
         }
 
-        /** \u6b63\u6587\u884c\uff1a\u5de6 20dp \u653e\u5706\u70b9/\u56fe\u6807\uff08\u7ad6\u8f68\u4ece\u6b63\u4e2d\u7a7f\u8fc7\uff09\uff0c\u53f3\u8fb9\u662f\u6587\u5b57\u3002 */
+        /** 正文行：左 20dp 放圆点/图标（竖轨从正中穿过），右边是文字。 */
         TextView line(String mark, int markColor, int textColor) {
             LinearLayout row = new LinearLayout(ctx);
             row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1667,53 +2415,260 @@ public class ChatView extends ScrollView {
             return tx;
         }
 
+        /**
+         * 思考增量：落进当前这条思考行（ThinkRow）。
+         * 上一行是工具行就另起一条（harness 的 reasoning block 也是一段一块）。
+         */
         void para(String chunk) {
-            if (paraTv == null || lastTool) {
-                paraTv = line("\u2022", Ui.MUT, Ui.DIM);
-                paraBuf.setLength(0);
+            if (curThink == null || lastTool) {
+                curThink = new ThinkRow();
+                curThink.attach(body);
                 paras++;
                 lastTool = false;
-                refresh();                  // \u53ea\u5728\u8d77\u65b0\u6bb5\u65f6\u5237\u6807\u9898\uff1a\u6d41\u5f0f\u671f\u95f4\u522b\u6bcf\u5e27 setText
+                refresh();                  // 只在起新条时刷标题：流式期间别每帧重排
             }
-            paraBuf.append(chunk);
-            paraTv.setText(paraBuf.length() > 2600
-                    ? "\u2026" + paraBuf.substring(paraBuf.length() - 2600) : paraBuf);
+            curThink.append(chunk);
             follow();
         }
 
-        void toolRow(String name, String args) {
+        void paintPara() {
+            if (curThink != null) curThink.paint();
+        }
+
+        ToolItem addTool(String callId, String name, String args) {
             tools++;
             lastTool = true;
+            curThink = null;
             paraTv = null;
             refresh();
+            ToolItem it = new ToolItem(callId, name);
+            it.attach(body);
+            it.setArgs(args);
+            items.add(it);
+            String v = toolVariant(name);            // 类别计数：结算后的组名就是它排出来的
+            Integer n = cats.get(v);
+            cats.put(v, n == null ? 1 : n + 1);
+            toolItems.put(callId, it);
+            follow();
+            return it;
+        }
+
+        /** 收尾：标题定稿（摘要换全文首行），正文折叠，只留表头。 */
+        void finish() {
+            if (done) return;
+            if (curThink != null) curThink.settle();
+            paintPara();
+            for (int i = 0; i < items.size(); i++) {
+                ToolItem it = items.get(i);
+                if (it.phase <= 1) it.setPhase(2);      // 没收到的结果：别再挂着「运行中」
+            }
+            done = true;
+            Ui.stopShimmer(hTitle);                        // 跑完了就不再扫高光
+            Ui.stopShimmer(hPrev);
+            endAt = System.currentTimeMillis();            // 用时定格：重画时不能再变
+            open = false;                                  // 思考结束自动收起，只留表头（DeepSeek 的框也是这样）
+            body.setVisibility(View.GONE);
+            if (bodyWrap != null) bodyWrap.setVisibility(View.GONE);
+            refresh();
+        }
+
+        /** 找不到对应工具行（结果先到 / 历史残缺）：内容不能丢，自己落一行。 */
+        void resultFallback(String text, boolean err) {
+            String t = text == null ? "" : text.trim();
+            if (t.length() > 4000) t = t.substring(0, 4000) + "\u2026";
+            TextView tx = line(err ? "\u2717" : "\u21B3", err ? Ui.RED : Ui.MUT,
+                    err ? Ui.RED : Ui.DIM);
+            tx.setText(t.length() == 0 ? "(\u7A7A)" : t);
+            follow();
+        }
+    }
+
+    /** 一条思考（harness 的 ReasoningRow）：默认一行「思考 · 摘要」，点开才是全文。 */
+    class ThinkRow {
+        final LinearLayout item = Ui.col(ctx);
+        final LinearLayout line = new LinearLayout(ctx);
+        final TextView title = new TextView(ctx);
+        final TextView prev = new TextView(ctx);
+        final TextView full = new TextView(ctx);
+        final StringBuilder buf = new StringBuilder();
+        long lastPaint;
+        boolean open;
+
+        ThinkRow() {
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            line.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView mark = new TextView(ctx);
+            mark.setText("\u2726");
+            mark.setTextSize(Ui.FS_SMALL);
+            mark.setTextColor(Ui.AMBER);
+            mark.setTypeface(Typeface.MONOSPACE);
+            mark.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            line.addView(mark, new LinearLayout.LayoutParams(Ui.dp(ctx, 20),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            title.setText("\u601D\u8003");                       // 思考
+            title.setTextSize(Ui.FS_SMALL);
+            title.setTextColor(Ui.DIM);
+            title.setSingleLine(true);
+            line.addView(title);
+            prev.setTextSize(Ui.FS_SMALL);
+            prev.setTextColor(Ui.MUT);
+            prev.setSingleLine(true);
+            prev.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            prev.setPadding(Ui.dp(ctx, 5), 0, 0, 0);
+            line.addView(prev, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            item.addView(line);
+            full.setTextSize(Ui.FS_SMALL);
+            full.setTextColor(Ui.DIM);
+            full.setLineSpacing(Ui.dp(ctx, 4), 1f);
+            full.setTextIsSelectable(true);
+            full.setVisibility(View.GONE);
+            LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            flp.leftMargin = Ui.dp(ctx, 20);
+            flp.topMargin = Ui.dp(ctx, 2);
+            item.addView(full, flp);
+            line.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    open = !open;
+                    if (open) {
+                        full.setText(buf);                   // 展开就是全文（harness 也不截尾）
+                        full.setVisibility(View.VISIBLE);
+                        prev.setText("");
+                        Ui.stopShimmer(prev);
+                    } else {
+                        full.setVisibility(View.GONE);
+                        paint();
+                    }
+                    toggleInPlace(item);
+                    if (trace != null) trace.follow();
+                }
+            });
+            Ui.press(line, ctx, 0x00000000, Ui.R_CHIP);
+        }
+
+        void attach(LinearLayout host) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(ctx, 4);
+            host.addView(item, lp);
+        }
+
+        void append(String chunk) {
+            buf.append(chunk);
+            if (open) {
+                full.setText(buf);
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (now - lastPaint > 240) {          // 节流：长思考别每帧重排
+                lastPaint = now;
+                paint();
+            }
+        }
+
+        /** 折叠态：一行摘要；还在流就整条扫高光（harness 的 TextShimmer）。 */
+        void paint() {
+            if (open) return;
+            prev.setText(preview(false));
+            if (trace != null && !trace.done) {
+                Ui.shimmer(prev, Ui.MUT, Ui.TEXT);
+            } else {
+                Ui.stopShimmer(prev);
+            }
+        }
+
+        void settle() {
+            Ui.stopShimmer(prev);
+            paint();
+        }
+
+        /**
+         * harness 的摘要规则：流式时取「最后一段的首行」（上一段写完了才认它），
+         * 结算后取全文首行；** 标记剥掉。
+         */
+        String preview(boolean finished) {
+            String s = buf.length() == 0 ? "" : buf.toString();
+            if (s.length() == 0) return "";
+            if (!finished) {
+                int e = s.length();
+                while (e > 0) {
+                    char c = s.charAt(e - 1);
+                    if (c == '\n' || c == ' ' || c == '\t' || c == '\r') e--;
+                    else break;
+                }
+                s = s.substring(0, e);
+            }
+            String para = s;
+            if (!finished) {
+                int cut = s.lastIndexOf("\n\n");
+                para = cut >= 0 ? s.substring(cut + 2) : s;
+                if (cut >= 0 && para.indexOf('\n') < 0) {          // 最后一段还没写完 → 退回上一段
+                    int pv = s.lastIndexOf("\n\n", cut - 1);
+                    String prevPara = pv >= 0 ? s.substring(pv + 2, cut) : s.substring(0, cut);
+                    if (prevPara.trim().length() > 0) para = prevPara;
+                }
+            }
+            int nl = para.indexOf('\n');
+            String line = (nl < 0 ? para : para.substring(0, nl)).trim();
+            line = line.replace("**", "").replaceAll("\\s+", " ").trim();
+            return line;
+        }
+    }
+
+    /** 工具行按 callId 认领：结果落回自己那一行，不是笼统塞给「最后一行」。 */
+    private final java.util.HashMap<String, ToolItem> toolItems =
+            new java.util.HashMap<String, ToolItem>();
+    private int autoToolId;
+
+    /**
+     * 一行工具调用：图标 + 标题 · 摘要 + 右侧状态，点开看参数与输出。
+     * 结构抄 ui-tool/ToolCallRow：variant → 图标/标题，args → 摘要，phase → 状态文案。
+     */
+    public class ToolItem {
+        final String callId;
+        final String name;
+        final LinearLayout item = Ui.col(ctx);
+        final TextView glyph = new TextView(ctx);
+        final TextView label = new TextView(ctx);      // 业务标题（读取文件 / 调用工具）
+        final TextView sum = new TextView(ctx);        // · 摘要（失败时换成错误首行）
+        final TextView det = new TextView(ctx);
+        String args = "";
+        String out = "";
+        int phase;                       // 0 准备中 · 1 运行中 · 2 完成 · 3 失败 · 4 已打断
+
+        ToolItem(String callId, String name) {
+            this.callId = callId;
+            this.name = name;
             LinearLayout row = new LinearLayout(ctx);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            TextView mk = new TextView(ctx);
-            mk.setText(toolGlyph(name, args));
-            mk.setTextSize(Ui.FS_SMALL);
-            mk.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-            row.addView(mk, new LinearLayout.LayoutParams(Ui.dp(ctx, 20),
+            glyph.setTextSize(Ui.FS_SMALL);
+            glyph.setTypeface(Typeface.MONOSPACE);
+            glyph.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            row.addView(glyph, new LinearLayout.LayoutParams(Ui.dp(ctx, 20),
                     LinearLayout.LayoutParams.WRAP_CONTENT));
-            TextView tx = new TextView(ctx);
-            tx.setText(toolLabel(name, args));
-            tx.setTextSize(Ui.FS_SMALL);
-            tx.setTextColor(Ui.TEXT);
-            tx.setLineSpacing(Ui.dp(ctx, 4), 1f);
-            row.addView(tx, new LinearLayout.LayoutParams(0,
+            label.setTextSize(Ui.FS_SMALL);
+            label.setTextColor(Ui.DIM);                    // harness：标题走次级色
+            label.setSingleLine(true);
+            row.addView(label, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            sum.setTextSize(Ui.FS_SMALL);
+            sum.setTextColor(Ui.MUT);                      // 摘要再暗一档
+            sum.setSingleLine(true);
+            sum.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            sum.setPadding(Ui.dp(ctx, 5), 0, 0, 0);
+            row.addView(sum, new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            final LinearLayout item = Ui.col(ctx);
             item.addView(row, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            final TextView det = new TextView(ctx);
-            det.setTextSize(Ui.FS_SMALL);
+            det.setTextSize(Ui.FS_MONO);
             det.setTextColor(Ui.DIM);
             det.setTypeface(Typeface.MONOSPACE);
+            det.setLineSpacing(Ui.dp(ctx, 3), 1f);
             det.setBackground(Ui.bg(Ui.SURF2, 10, ctx));
             det.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
             det.setVisibility(View.GONE);
-            String raw = args == null ? "" : args.trim();
-            det.setText((name == null || name.length() == 0 ? "" : name + "\n")
-                    + (raw.length() == 0 ? "(\u65e0\u53c2\u6570)" : raw));
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             dlp.leftMargin = Ui.dp(ctx, 20);
@@ -1721,50 +2676,282 @@ public class ChatView extends ScrollView {
             item.addView(det, dlp);
             item.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    det.setVisibility(det.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                    boolean show = det.getVisibility() != View.VISIBLE;
+                    det.setVisibility(show ? View.VISIBLE : View.GONE);
+                    if (show) paintDet();
                     toggleInPlace(item);
-                    follow();
+                    if (trace != null) trace.follow();
                 }
             });
             Ui.press(item, ctx, 0x00000000, Ui.R_CHIP);
+            paint();
+        }
+
+        void attach(LinearLayout host) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.topMargin = Ui.dp(ctx, 6);
-            body.addView(item, lp);
-            lastToolDet = det;
-            lastToolArgs = raw;
-            follow();
+            host.addView(item, lp);
         }
 
-        void result(String text, boolean err) {
-            String t = text == null ? "" : text.trim();
-            if (t.length() > 4000) t = t.substring(0, 4000) + "\u2026";
-            if (lastToolDet == null) {          // \u7ed3\u679c\u5148\u5230\uff08\u5386\u53f2\u56de\u653e\uff09\u2192 \u81ea\u5df1\u843d\u4e00\u884c
-                TextView tx = line(err ? "\u2717" : "\u21b3", err ? Ui.RED : Ui.MUT, Ui.DIM);
-                tx.setText(t.length() == 0 ? "(\u7a7a)" : (t.length() > 300 ? t.substring(0, 300) + "\u2026" : t));
-                follow();
-                return;
+        void setArgs(String a) {
+            if (a == null) return;
+            args = a;
+            if (phase == 0 && args.trim().length() > 0) phase = 1;
+            paint();
+        }
+
+        void appendArgs(String chunk) {
+            if (chunk == null || chunk.length() == 0) return;
+            args += chunk;
+            if (phase < 1) phase = 0;                 // 参数还在长 → 准备中
+            paint();
+        }
+
+        void setPhase(int p) {
+            phase = p;
+            paint();
+        }
+
+        void setResult(String text, boolean err) {
+            out = text == null ? "" : text;
+            phase = err ? 3 : 2;
+            paint();
+            if (det.getVisibility() == View.VISIBLE) paintDet();
+        }
+
+        /**
+         * 一行说完：业务图标 + 标题 + · 摘要。
+         * 状态不写字（harness 不挂状态文案）：运行中扫高光、失败摘要转红、打断转琥珀，
+         * 图标从头到尾都是这个工具的业务图标。
+         */
+        void paint() {
+            String v = toolVariant(name);
+            glyph.setText(toolIcon(v));
+            glyph.setTextColor(toolColor(v));
+            label.setText("others".equals(v)
+                    ? "\u8C03\u7528\u5DE5\u5177" : toolTitle(v));      // 调用工具
+            String sm = summary();
+            sum.setText(sm.length() == 0 ? "" : " \u00B7 " + sm);
+            if (phase == 3) {
+                sum.setTextColor(Ui.RED);
+            } else if (phase == 4) {
+                sum.setTextColor(Ui.AMBER);
+            } else {
+                sum.setTextColor(Ui.MUT);
             }
-            StringBuilder sb = new StringBuilder(lastToolArgs);
-            if (t.length() > 0) {
+            boolean running = phase == 0 || phase == 1;
+            if (running) {
+                Ui.shimmer(label, Ui.DIM, Ui.TEXT);
+                Ui.shimmer(sum, Ui.MUT, Ui.TEXT);
+            } else {
+                Ui.stopShimmer(label);
+                Ui.stopShimmer(sum);
+            }
+        }
+
+        /** 折叠行的那句摘要（harness 的 SUMMARY_KEYS + 失败用结果首行）。 */
+        String summary() {
+            String v = toolVariant(name);
+            if (phase == 3) {
+                String e = firstLineOf(out);
+                if (e.length() > 0) return e;
+            }
+            if (phase == 4) return "\u5DF2\u4E2D\u65AD";             // 已中断
+            if (phase == 0 && ("write".equals(v) || "edit".equals(v))) {
+                long kb = (long) Math.ceil((args == null ? 0 : args.length()) / 1024.0);
+                return "\u6B63\u5728\u51C6\u5907\u5185\u5BB9 " + kb + "KB";
+            }
+            String s = toolSummary(v, args);
+            if ("others".equals(v) && name != null && name.length() > 0) {
+                s = s.length() == 0 ? name : name + " \u00B7 " + s;
+            }
+            return s;
+        }
+
+        private String firstLineOf(String t) {
+            if (t == null) return "";
+            String s = t.trim();
+            int nl = s.indexOf('\n');
+            if (nl >= 0) s = s.substring(0, nl).trim();
+            return clean(s, 120);
+        }
+
+        private String stateText() {
+            if (phase == 0) return "\u51C6\u5907\u4E2D";     // 准备中
+            if (phase == 1) return "\u8FD0\u884C\u4E2D";     // 运行中
+            if (phase == 3) return "\u2717";                 // ✗
+            if (phase == 4) return "\u2298";                 // ⊘ 打断
+            return "\u2713";                                 // ✓
+        }
+
+        private int stateColor() {
+            if (phase == 3) return Ui.RED;
+            if (phase == 0 || phase == 1) return Ui.AMBER;
+            if (phase == 4) return Ui.MUT;
+            return Ui.GREEN;
+        }
+
+        void paintDet() {
+            StringBuilder sb = new StringBuilder();
+            sb.append(pretty(args));
+            if (out.trim().length() > 0) {
                 if (sb.length() > 0) sb.append("\n\n");
-                sb.append(t);
+                sb.append(out.length() > 4000 ? out.substring(0, 4000) + "\u2026" : out);
             }
-            lastToolDet.setText(sb.length() == 0 ? "(\u7a7a)" : sb.toString());
-            if (err) lastToolDet.setTextColor(Ui.RED);
-            follow();
+            det.setText(sb.length() == 0 ? "(\u7A7A)" : sb.toString());   // (空)
+            det.setTextColor(phase == 3 ? Ui.RED : Ui.DIM);
         }
 
-        /** \u6536\u5c3e\uff1a\u6807\u9898\u5b9a\u7a3f\uff0c\u6b63\u6587\u6298\u53e0\uff08\u6807\u9898\u5e38\u9a7b\uff0c\u70b9\u4e00\u4e0b\u8fd8\u80fd\u5c55\u5f00\uff09\u3002 */
-        void finish() {
-            if (done) return;
-            if (paraTv != null && paraBuf.length() > 0) paraTv.setText(paraBuf);
-            done = true;
-            open = false;                                  // 思考结束自动收起，只留表头
-            body.setVisibility(View.GONE);
-            if (bodyWrap != null) bodyWrap.setVisibility(View.GONE);
-            refresh();
+        /** 参数：能当 JSON 解析就缩进一下，不然原样贴。 */
+        String pretty(String raw) {
+            if (raw == null) return "";
+            String s = raw.trim();
+            if (s.length() == 0) return "";
+            try {
+                org.json.JSONObject o = new org.json.JSONObject(s);
+                return o.toString(2);
+            } catch (Exception ignored) {
+            }
+            try {
+                org.json.JSONArray a = new org.json.JSONArray(s);
+                return a.toString(2);
+            } catch (Exception ignored) {
+            }
+            return s;
         }
     }
 
+    /** 类别名：过程组表头用（harness 的 message.stepProcess.*）。 */
+    private static String toolTitle(String v) {
+        if ("read".equals(v)) return "\u8BFB\u53D6\u6587\u4EF6";      // 读取文件
+        if ("search".equals(v)) return "\u641C\u7D22";                  // 搜索
+        if ("bash".equals(v)) return "\u8FD0\u884C\u547D\u4EE4";      // 运行命令
+        if ("write".equals(v)) return "\u5199\u5165\u6587\u4EF6";     // 写入文件
+        if ("edit".equals(v)) return "\u7F16\u8F91\u6587\u4EF6";      // 编辑文件
+        if ("code".equals(v)) return "\u8FD0\u884C\u4EE3\u7801";      // 运行代码
+        if ("thinking".equals(v)) return "\u601D\u8003";                // 思考
+        return "\u8C03\u7528\u5DE5\u5177";                            // 调用工具
+    }
+
+    /** 工具名 → harness 的行类型（search/read/bash/write/edit/code/others）。 */
+    private static String toolVariant(String name) {
+        String s = name == null ? "" : name.toLowerCase();
+        if (s.equals("bash") || s.equals("pwsh") || s.indexOf("shell") >= 0
+                || s.indexOf("terminal") >= 0) return "bash";
+        if (s.indexOf("search") >= 0 || s.indexOf("grep") >= 0 || s.indexOf("glob") >= 0) return "search";
+        if (s.indexOf("fetch") >= 0 || s.indexOf("read") >= 0 || s.indexOf("cat") >= 0
+                || s.indexOf("inspect") >= 0) return "read";
+        if (s.indexOf("write") >= 0) return "write";
+        if (s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) return "edit";
+        if (s.indexOf("code") >= 0 || s.indexOf("run_code") >= 0) return "code";
+        return "others";
+    }
+
+    /** 图标：harness 用 SVG，这里用等宽字形顶替，颜色跟着行类型走。 */
+    private static String toolIcon(String v) {
+        if ("bash".equals(v)) return "$";
+        if ("read".equals(v)) return "\u25A4";      // ▤
+        if ("search".equals(v)) return "\u2315";    // ⌕
+        if ("write".equals(v) || "edit".equals(v)) return "\u270E";   // ✎
+        if ("code".equals(v)) return "{}";
+        return "\u2699";                            // ⚙
+    }
+
+    private static int toolColor(String v) {
+        if ("bash".equals(v)) return Ui.AMBER;
+        if ("read".equals(v)) return Ui.ACCENT;
+        if ("search".equals(v)) return Ui.VIOLET;
+        if ("write".equals(v) || "edit".equals(v)) return Ui.GREEN;
+        if ("code".equals(v)) return Ui.ACCENT;
+        return Ui.MUT;
+    }
+
+    /** 行标题 + 摘要：bash 直接「$ 命令」，其余「标题 · 摘要」。 */
+    private String toolHead(String v, String name, String args) {
+        String summary = toolSummary(v, args);
+        if ("bash".equals(v)) return summary.length() == 0 ? "$" : "$ " + summary;
+        String title;
+        if ("read".equals(v)) title = "\u8BFB\u53D6\u6587\u4EF6";        // 读取文件
+        else if ("search".equals(v)) title = "\u641C\u7D22";             // 搜索
+        else if ("write".equals(v)) title = "\u5199\u5165\u6587\u4EF6";  // 写入文件
+        else if ("edit".equals(v)) title = "\u7F16\u8F91\u6587\u4EF6";   // 编辑文件
+        else if ("code".equals(v)) title = "\u8FD0\u884C\u4EE3\u7801";   // 运行代码
+        else title = (name == null || name.length() == 0) ? "\u5DE5\u5177" : name;
+        return summary.length() == 0 ? title : title + " \u00B7 " + summary;
+    }
+
+    /** 摘要：照抄 harness 的 SUMMARY_KEYS（bash=description|command，read=path|file_path|url …）。 */
+    private String toolSummary(String v, String args) {
+        String s = "";
+        if ("bash".equals(v)) s = pickArg(args, "description");
+        if (s.length() == 0 && "bash".equals(v)) s = pickArg(args, "command");
+        if (s.length() == 0 && ("read".equals(v) || "search".equals(v))) {
+            s = pickArg(args, "path");
+            if (s.length() == 0) s = pickArg(args, "file_path");
+            if (s.length() == 0) s = pickArg(args, "url");
+            if (s.length() == 0) s = pickArg(args, "query");
+            if (s.length() == 0) s = pickArg(args, "pattern");
+        }
+        if (s.length() == 0 && ("write".equals(v) || "edit".equals(v))) {
+            s = pickArg(args, "path");
+            if (s.length() == 0) s = pickArg(args, "file_path");
+        }
+        if (s.length() == 0 && "code".equals(v)) s = pickArg(args, "description");
+        if (s.length() == 0) s = pickArg(args, "description");
+        if (s.length() == 0) {
+            String c = clean(args, 120);
+            s = c.length() > 0 && c.charAt(0) == '{' ? "" : c;
+        }
+        s = s.replace("\\n", " ").replace("\n", " ").replace("\r", " ").trim();
+        int nl = s.indexOf('\n');
+        if (nl >= 0) s = s.substring(0, nl);
+        return s.length() > 120 ? s.substring(0, 120) + "\u2026" : s;
+    }
+
+    /** 工具调用：callId 认领一行（老 host 没 callId 时按名字自编号，退化成旧行为）。 */
+    public void tool(String callId, String name, String args) {
+        String id = callId == null || callId.length() == 0 ? autoKey(name) : callId;
+        thinkStart();
+        ToolItem it = toolItems.get(id);
+        if (it == null) {
+            trace.addTool(id, name, args);
+        } else {
+            it.setArgs(args);
+            it.setPhase(1);
+        }
+        scroll(false);
+    }
+
+    /** 参数流式到达（host 的 tool-call-delta）：行先出现，参数边长边补。 */
+    public void toolDelta(String callId, String name, String chunk) {
+        if (callId == null || callId.length() == 0) return;
+        ToolItem it = toolItems.get(callId);
+        if (it == null) {
+            thinkStart();
+            it = trace.addTool(callId, name, "");
+            it.setPhase(0);
+        }
+        it.appendArgs(chunk);
+        scroll(false);
+    }
+
+    /** 工具结果：认领回自己那一行，落成 ✓/✗。 */
+    public void toolResult(String callId, String text, boolean err, boolean stopped) {
+        ToolItem it = callId == null ? null : toolItems.get(callId);
+        if (it != null) {
+            if (stopped) it.setPhase(4);
+            else it.setResult(text, err);
+            scroll(false);
+            return;
+        }
+        if (traceLive() == null) thinkStart();
+        trace.resultFallback(text, err);
+        scroll(false);
+    }
+
+    private String autoKey(String name) {
+        autoToolId++;
+        return "~" + (name == null ? "tool" : name) + "#" + autoToolId;
+    }
 }

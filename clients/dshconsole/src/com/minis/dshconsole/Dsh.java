@@ -103,8 +103,13 @@ public class Dsh {
         }
     }
 
-    public synchronized int begin(String method, JSONObject params) throws Exception {
-        int id = ++counter;
+    private final Object idLock = new Object();
+
+    public int begin(String method, JSONObject params) throws Exception {
+        int id;
+        synchronized (idLock) {
+            id = ++counter;
+        }
         JSONObject o = new JSONObject();
         o.put("id", id);
         o.put("method", method);

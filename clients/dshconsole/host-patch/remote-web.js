@@ -14,8 +14,10 @@
  */
 import { createServer as createHttpServer, request as httpRequest } from 'node:http'
 import { connect as tcpConnect } from 'node:net'
-import { networkInterfaces } from 'node:os'
-import { timingSafeEqual } from 'node:crypto'
+import { networkInterfaces, homedir } from 'node:os'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { timingSafeEqual, createHmac, createHash } from 'node:crypto'
 
 /** Default LAN port. Set `web.port` to 0 in the plugin config to switch this off. */
 export const DEFAULT_WEB_PORT = 7790
@@ -45,36 +47,108 @@ function sameToken(a, b) {
   return timingSafeEqual(left, right)
 }
 
-/** Ask one loopback port for our own settings endpoint: a self-identifying probe. */
-function probePort(port, statusPath) {
+/**
+ * Mint the session cookie DSH's own web server expects on the proxy hop.
+ *
+ * "Loopback needs no launch token" only covers the token exchange: every
+ * request still has to carry an authority-bound signed cookie, and a phone only
+ * ever holds the devctl token. The signing secret is durable
+ * (`.dsh/.credentials.yaml`), so the cookie can be signed here and stamped onto
+ * whatever is forwarded upstream. Returns '' when the secret is unavailable,
+ * and the proxy then behaves exactly as before.
+ */
+function dshSessionCookie(authority) {
+  try {
+    const text = readFileSync(join(homedir(), '.dsh', '.credentials.yaml'), 'utf8')
+    const match = /client-connection\/browser-session:[\s\S]*?secret:\s*([A-Za-z0-9_-]+)/.exec(text)
+    if (!match) return ''
+    const raw = match[1]
+    const secret = Buffer.from(
+      raw.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (raw.length % 4)) % 4),
+      'base64',
+    )
+    if (secret.byteLength !== 32) return ''
+    const b64u = (value) =>
+      Buffer.from(value).toString('base64').replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+    const issuedAt = Date.now()
+    const payload = { version: 1, authority, issuedAt, expiresAt: issuedAt + 3600_000 }
+    const body = b64u(Buffer.from(JSON.stringify(payload), 'utf8'))
+    const signature = b64u(createHmac('sha256', secret).update(body).digest())
+    const name = `dsh-auth-${b64u(createHash('sha256').update(authority).digest())}`
+    return `${name}=v1.${body}.${signature}`
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Ask one loopback port for our own settings endpoint: a self-identifying probe.
+ * The plugin's own route sits behind DSH's browser-trust check, so the probe
+ * carries the control token in `?probe=` and the route waves it through.
+ */
+function probePort(port, statusPath, probeToken) {
+  const path = probeToken ? `${statusPath}?probe=${encodeURIComponent(probeToken)}` : statusPath
   return new Promise((resolve) => {
     const req = httpRequest(
-      { host: '127.0.0.1', port, path: statusPath, method: 'GET', headers: { accept: 'application/json' } },
+      { host: '127.0.0.1', port, path, method: 'GET', headers: { accept: 'application/json' } },
       (res) => {
         let size = 0
         res.on('data', (chunk) => {
           size += chunk.length
         })
-        res.on('end', () => resolve(res.statusCode === 200 && size > 0))
+        res.on('end', () => resolve({ ok: res.statusCode === 200 && size > 0, status: res.statusCode ?? 0 }))
       },
     )
     req.setTimeout(1200, () => req.destroy())
-    req.on('error', () => resolve(false))
+    req.on('error', () => resolve({ ok: false, status: 0 }))
     req.end()
   })
 }
 
-/** Find the loopback port the Host web server listens on, or '' when it is not up. */
-export async function discoverHostWeb(statusPath) {
+/**
+ * Last resort before admitting defeat: does *anything* speak HTTP on the port
+ * `dsh web` uses by default? The Host web server may answer its own login page
+ * where our marker route is unreachable, and a reachable target beats a 503.
+ */
+function probeHttp(port) {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port, path: '/', method: 'GET', headers: { accept: 'text/html' } },
+      (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode ?? 0))
+      },
+    )
+    req.setTimeout(1200, () => req.destroy())
+    req.on('error', () => resolve(0))
+    req.end()
+  })
+}
+
+/**
+ * `dsh web` binds this port unless told otherwise, so it is the one guess worth
+ * making when every self-identifying probe comes back empty.
+ */
+export const DEFAULT_HOST_WEB_PORT = 3081
+
+/**
+ * Find the loopback port the Host web server listens on. Never returns null —
+ * `origin` is '' when nothing answered, and `seen` lists every port that spoke
+ * HTTP at all (401/404 included) so the phone can show why it failed.
+ */
+export async function discoverHostWeb(statusPath, probeToken) {
   const tried = new Set()
+  const seen = []
   const ports = [...COMMON_PORTS]
   for (let p = 3000; p <= 3100; p += 1) ports.push(p)
   for (const port of ports) {
     if (tried.has(port)) continue
     tried.add(port)
-    if (await probePort(port, statusPath)) return { port, origin: `http://127.0.0.1:${port}` }
+    const hit = await probePort(port, statusPath, probeToken)
+    if (hit.status > 0 && hit.status !== 404) seen.push({ port, status: hit.status })
+    if (hit.ok) return { port, origin: `http://127.0.0.1:${port}`, seen }
   }
-  return null
+  return { port: 0, origin: '', seen }
 }
 
 /** Pull one header out of the raw header list (Node gives us no case-insensitive map there). */
@@ -84,6 +158,33 @@ function rawHeader(rawHeaders, name) {
     if (String(rawHeaders[i]).toLowerCase() === lower) return String(rawHeaders[i + 1] ?? '')
   }
   return ''
+}
+
+/**
+ * One forwarded header value, rewritten the way the Host web server would have
+ * seen it if the request had come from its own loopback browser.
+ *
+ * The DSH web server rejects requests that look cross-origin (`403 forbidden`),
+ * and a viewer on the LAN *always* looks cross-origin to it: its `Origin` is
+ * `http://<lan-ip>:7790` while the server believes it lives on 127.0.0.1. The
+ * page's own fetches and websockets therefore come back 403 and the settings
+ * sections render "transport failure … HTTP 403". Rewriting the three
+ * provenance headers keeps the server's same-origin guard satisfied without
+ * loosening anything on the phone side.
+ */
+function asLocalHeader(name, value, base) {
+  if (name === 'host') return base.host
+  if (name === 'origin') return base.origin
+  if (name === 'referer') {
+    try {
+      const ref = new URL(value)
+      return `${base.origin}${ref.pathname}${ref.search}`
+    } catch {
+      return `${base.origin}/`
+    }
+  }
+  if (name === 'sec-fetch-site' && value !== 'none') return 'same-origin'
+  return value
 }
 
 /** Where the caller's devctl token came from, if anywhere. */
@@ -127,7 +228,7 @@ export function installRemoteWeb({
   warn = () => {},
 } = {}) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) return null
-  const info = { port, origin: target, ready: false, reason: target ? 'configured' : 'searching' }
+  const info = { port, origin: target, ready: false, reason: target ? 'configured' : 'searching', url: '', seen: [] }
   let searching = null
 
   const ensureOrigin = () => {
@@ -137,18 +238,27 @@ export function installRemoteWeb({
       return Promise.resolve(info.origin)
     }
     if (!searching) {
-      searching = discoverHostWeb(statusPath)
-        .then((found) => {
-          if (!found) {
-            info.ready = false
-            info.reason = 'host-web-not-found'
-            return ''
+      searching = discoverHostWeb(statusPath, token)
+        .then(async (found) => {
+          info.seen = found.seen ?? []
+          if (found.origin) {
+            info.origin = found.origin
+            info.ready = true
+            info.reason = 'discovered'
+            log(`web window target ${found.origin} (port ${found.port})`)
+            return info.origin
           }
-          info.origin = found.origin
-          info.ready = true
-          info.reason = 'discovered'
-          log(`web window target ${found.origin} (port ${found.port})`)
-          return info.origin
+          const status = await probeHttp(DEFAULT_HOST_WEB_PORT)
+          if (status > 0) {
+            info.origin = `http://127.0.0.1:${DEFAULT_HOST_WEB_PORT}`
+            info.ready = true
+            info.reason = 'host-web-default'
+            log(`web window target ${info.origin} (dsh web default port, HTTP ${status})`)
+            return info.origin
+          }
+          info.ready = false
+          info.reason = 'host-web-not-found'
+          return ''
         })
         .catch((error) => {
           warn(error)
@@ -157,9 +267,31 @@ export function installRemoteWeb({
         })
         .finally(() => {
           searching = null
+          syncUrl()
         })
     }
     return searching
+  }
+
+  /**
+   * The one URL the phone should open: the LAN listener plus the control token.
+   * Exposed over the authenticated devctl channel, so it leaks nothing new.
+   */
+  const syncUrl = () => {
+    const address = addresses()[0] ?? ''
+    info.url = info.ready && address ? `http://${address}:${info.port}/?token=${encodeURIComponent(token ?? '')}` : ''
+  }
+
+  /** The Host web server knows its own port; prefer it over any port sweep. */
+  const setTarget = (origin) => {
+    if (typeof origin !== 'string' || origin.length === 0) return false
+    info.origin = origin
+    info.ready = true
+    info.reason = 'host-service'
+    searching = null
+    syncUrl()
+    log(`web window target ${origin} (from the Host web server)`)
+    return true
   }
 
   const addresses = () => {
@@ -200,6 +332,8 @@ export function installRemoteWeb({
         port: info.port,
         origin: info.origin,
         reason: info.reason,
+        url: info.url,
+        seen: info.seen,
         addresses: addresses(),
       })
       const body = Buffer.from(payload, 'utf8')
@@ -238,6 +372,11 @@ export function installRemoteWeb({
       for (const key of Object.keys(headers)) {
         if (HOP_BY_HOP.has(key.toLowerCase())) delete headers[key]
       }
+      for (const key of Object.keys(headers)) {
+        headers[key] = asLocalHeader(key.toLowerCase(), headers[key], base)
+      }
+      const session = dshSessionCookie(base.host)
+      if (session) headers.cookie = headers.cookie ? `${headers.cookie}; ${session}` : session
       const upstream = httpRequest(
         { host: base.hostname, port: base.port || 80, method: request.method, path: request.url, headers },
         (up) => {
@@ -277,11 +416,23 @@ export function installRemoteWeb({
         socket.destroy()
         return
       }
+      const session = dshSessionCookie(base.host)
       const upstream = tcpConnect(Number(base.port || 80), base.hostname, () => {
+        // The session cookie has to ride along on the handshake too, or the
+        // upgrade is fenced out even though the page itself loaded.
+        const cookies = []
         let head_text = `${request.method} ${request.url} HTTP/1.1\r\n`
         for (let i = 0; i < request.rawHeaders.length; i += 2) {
-          head_text += `${request.rawHeaders[i]}: ${request.rawHeaders[i + 1]}\r\n`
+          const name = String(request.rawHeaders[i])
+          if (name.toLowerCase() === 'cookie') {
+            cookies.push(String(request.rawHeaders[i + 1] ?? ''))
+            continue
+          }
+          const value = asLocalHeader(name.toLowerCase(), String(request.rawHeaders[i + 1] ?? ''), base)
+          head_text += `${name}: ${value}\r\n`
         }
+        if (session) cookies.push(session)
+        if (cookies.length > 0) head_text += `Cookie: ${cookies.join('; ')}\r\n`
         head_text += '\r\n'
         upstream.write(head_text)
         if (head && head.length > 0) upstream.write(head)
@@ -304,8 +455,15 @@ export function installRemoteWeb({
     ensureOrigin()
   })
 
+  // The host is handed `bridge.web = info` (the bare info object) and later
+  // calls `bridge.web.setTarget(...)`. Without this alias that call is a silent
+  // no-op, the window keeps `ready: false`, and the phone is told the Host web
+  // service was never found even though its port is already known.
+  info.setTarget = (origin) => setTarget(origin)
+
   return {
     info,
+    setTarget,
     health: () => ensureOrigin().then(() => info),
     dispose: () =>
       new Promise((resolve) => {

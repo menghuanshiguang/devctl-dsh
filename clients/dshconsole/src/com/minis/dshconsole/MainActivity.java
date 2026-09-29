@@ -440,6 +440,15 @@ public class MainActivity extends Activity {
         return (TabChat) tabChat;
     }
 
+    /** 选图 / 拍照的结果转给聊天页（TabChat 自己发起的选择器）。 */
+    @Override
+    protected void onActivityResult(int req, int res, android.content.Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == 4711 && res == RESULT_OK && tabChat instanceof TabChat) {
+            ((TabChat) tabChat).onPickResult(data);
+        }
+    }
+
     public Dsh requireDsh() throws Exception {
         if (dsh != null && dsh.alive()) return dsh;
         Store.Dev dev = store.find("dsh", dshName);

@@ -24,7 +24,21 @@ public class TabChat extends Tab {
     private EditText input;
     private TextView status;
     private TextView sendBtn;
+    private TextView plusBtn;
+    /** 排队中的消息：host 的信箱才是权威，本地只多加一行「还没被 splice 认领」的乐观行。 */
+    private final java.util.List<Queued> queue = new java.util.ArrayList<Queued>();
+    private long lastInboxAt;
+    /** 最后一条发出去的时刻 + 最后一个回包的时刻：用来量「局域网到底慢在哪」。 */
+    private volatile long sentAt;
+    private volatile long lastEventAt;
+    private boolean inboxRefreshing;
+    /** host 都没连上时的本地挂起（连上了就直接交给 host 的队列，不再拦在本机）。 */
     private final java.util.List<String> pending = new java.util.ArrayList<String>();
+    /** 还没发出去的图片（输入框上方那一排）。 */
+    private final java.util.List<Img> attachments = new java.util.ArrayList<Img>();
+    private LinearLayout attStrip;
+    private LinearLayout queueDock;
+    private static final int REQ_PICK_IMAGE = 4711;
 
     private String sessionId = "";
     private String sessionTitle = "";
@@ -43,6 +57,54 @@ public class TabChat extends Tab {
 
     public TabChat(MainActivity a) {
         super(a);
+        installImgLoader();
+    }
+
+    /** 装图片加载器：只有聊天页知道该用哪条连接去问 host 要字节。 */
+    private void installImgLoader() {
+        Img.setLoader(new Img.Loader() {
+            public android.graphics.Bitmap load(Img img, String size) throws Exception {
+                Dsh c = act.openDsh(9000);
+                try {
+                    if (img.attachmentId.length() == 0 && img.path.length() > 0) {
+                        // host 上的文件：先落库换一个附件引用，再照常取字节
+                        JSONObject q = new JSONObject();
+                        q.put("sessionId", sessionId);
+                        q.put("path", img.path);
+                        JSONObject f = c.request("sessions.file", q, 60000, null);
+                        img.attachmentId = f.optString("attachmentId", "");
+                        img.mediaType = f.optString("mediaType", img.mediaType);
+                        img.bytes = f.optInt("bytes", img.bytes);
+                        img.width = f.optInt("width", img.width);
+                        img.height = f.optInt("height", img.height);
+                        logImg("sessions.file ok id=" + img.attachmentId + " path=" + img.path);
+                    }
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", sessionId);
+                    p.put("attachment", img.ref());
+                    p.put("size", size);
+                    JSONObject r = c.request("sessions.image", p, 60000, null);
+                    logImg("sessions.image ok size=" + size + " bytes=" + r.optInt("bytes", 0));
+                    return Img.decode(r.optString("base64", ""), "thumb".equals(size) ? 1024 : 2560);
+                } catch (Exception e) {
+                    logImg("sessions.image 失败: " + e);
+                    throw e instanceof Exception ? (Exception) e : new Exception(e);
+                } finally {
+                    try {
+                        c.close();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        });
+    }
+
+    /** 图片链路的诊断日志：出问题时 `logcat -s DshImg` 一看就知道断在哪一步。 */
+    private static void logImg(String msg) {
+        try {
+            android.util.Log.i("DshImg", msg);
+        } catch (Throwable ignored) {
+        }
     }
 
     protected View build() {
@@ -113,6 +175,16 @@ public class TabChat extends Tab {
         int p = Ui.dp(act, 2);
         bar.setPadding(p, p, p, p);
 
+        plusBtn = Ui.tv(act, "＋", 18f, Ui.DIM);       // 发图入口：和 ↑ 一左一右，不抢主角
+        plusBtn.setGravity(Gravity.CENTER);
+        plusBtn.setBackground(Ui.bg(Ui.SURF2, 19, act));
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(Ui.dp(act, 38), Ui.dp(act, 38));
+        plusBtn.setLayoutParams(plp);
+        plusBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { pickImage(); }
+        });
+        bar.addView(plusBtn);
+
         input = new EditText(act);
         input.setHint("发消息…");
         input.setTextColor(Ui.TEXT);
@@ -127,7 +199,6 @@ public class TabChat extends Tab {
         LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         bar.addView(input, ilp);
-
         sendBtn = Ui.tv(act, "↑", 19f, 0xFFFFFFFF);
         sendBtn.setGravity(Gravity.CENTER);
         sendBtn.setBackground(Ui.bg(Ui.ACCENT, 21, act));
@@ -150,6 +221,22 @@ public class TabChat extends Tab {
         card.setBackground(Ui.bg(Ui.CARD, 22, act));     // 卡面本身不描边
         int cp = Ui.dp(act, 6);
         card.setPadding(cp, cp, cp, cp);
+
+        queueDock = new LinearLayout(act);            // 队列坞：已交给 host 还在等的消息，可撤回/插话
+        queueDock.setOrientation(LinearLayout.VERTICAL);
+        queueDock.setVisibility(View.GONE);
+        card.addView(queueDock, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        attStrip = new LinearLayout(act);             // 待发图片缩略条
+        attStrip.setOrientation(LinearLayout.HORIZONTAL);
+        attStrip.setVisibility(View.GONE);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        alp.topMargin = Ui.dp(act, 6);
+        alp.leftMargin = Ui.dp(act, 6);
+        card.addView(attStrip, alp);
+
         card.addView(bar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         modeRow.setPadding(Ui.dp(act, 8), Ui.dp(act, 4), Ui.dp(act, 6), 0);   // 和输入文字左对齐
@@ -719,6 +806,105 @@ public class TabChat extends Tab {
         });
     }
 
+    // ---------------- 回合状态：只从 host 读，不靠客户端猜 ----------------
+    // 「可发送 / 停止发送」＝ host 那个会话的 running 字段（sessions.state，老 host 退回 sessions.list）。
+    // 本地只负责渲染增量；不再用"我发过消息/收到过 turn-end"来推断按钮语义。
+
+    private volatile boolean hostRunning = false;
+    private volatile boolean hostStateKnown = false;
+    private volatile boolean stateBusy = false;
+    private Thread stateThread;
+    private volatile String statusBase = "连接中…";
+
+    /** 状态栏＝「连接 + host 报的回合状态」，永远由 host 说了算。 */
+    private void setStateStatus() {
+        act.ui(new Runnable() {
+            public void run() {
+                setStatus(statusBase + " · " + (hostRunning ? "停止发送" : "可发送"),
+                          hostRunning ? Ui.ACCENT : Ui.GREEN);
+            }
+        });
+    }
+
+    private void applyHostState(final boolean running, final String why) {
+        hostStateKnown = true;
+        hostRunning = running;
+        streaming = running;                 // 老的 streaming 判断点全部改吃 host 状态
+        streamingUi(running);
+        setStateStatus();                    // 每次都拉回 host 口径；瞬时提示活不过一个轮询周期
+        logFrame("host-state", (running ? "running" : "idle") + " · " + why);
+    }
+
+    /** 读一次 host 的真实运行状态。任何异常都只记日志，绝不用本地猜测兜底。 */
+    private void refreshHostState(final String why) {
+        final String id = sessionId;
+        if (id == null || id.length() == 0 || stateBusy) return;
+        stateBusy = true;
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    Dsh c = conn;
+                    if (c == null) return;
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", id);
+                    boolean running;
+                    JSONObject r = null;
+                    try {
+                        r = c.request("sessions.state", p, 12000, null);
+                    } catch (Exception older) {
+                        r = null;                                    // 老 host 没这个方法
+                    }
+                    if (r != null && r.optJSONObject("state") != null) {
+                        running = r.optJSONObject("state").optBoolean("running", false);
+                    } else {
+                        JSONObject list = c.request("sessions.list", new JSONObject(), 20000, null);
+                        JSONArray items = list.optJSONArray("items");
+                        JSONObject found = null;
+                        for (int i = 0; items != null && i < items.length(); i++) {
+                            JSONObject one = items.optJSONObject(i);
+                            if (one != null && id.equals(one.optString("sessionId", ""))) found = one;
+                        }
+                        if (found == null) return;                   // 列表里还没出现，下一轮再读
+                        running = found.optBoolean("running", false);
+                    }
+                    if (!id.equals(sessionId)) return;               // 期间切了会话，丢掉过期结果
+                    applyHostState(running, why);
+                } catch (Exception e) {
+                    logFrame("host-state-err", why + " · " + e.getMessage());
+                } finally {
+                    stateBusy = false;
+                }
+            }
+        });
+    }
+
+    /** 状态轮询：host 才是唯一真相，事件漏了、别人在 PC 上发起的回合，靠它兜住。 */
+    private void startStateWatch() {
+        stopStateWatch();
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                while (!stopPump) {
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    if (stopPump || conn == null) continue;
+                    refreshHostState("poll");
+                }
+            }
+        });
+        t.setDaemon(true);
+        stateThread = t;
+        t.start();
+    }
+
+    private void stopStateWatch() {
+        Thread t = stateThread;
+        stateThread = null;
+        if (t != null) t.interrupt();
+    }
+
     /** 回合结束：把挂起的消息放行 —— 此时发出去，就等于"等到了"。 */
     private void flushPending() {
         if (pending.isEmpty() || sessionId.length() == 0) {
@@ -741,7 +927,7 @@ public class TabChat extends Tab {
             }
         });
         setStatus("放行挂起的 " + n + " 条…", Ui.AMBER);
-        post(sb.toString(), "queue");
+        post(sb.toString(), null, "queue", null);
     }
 
     // ---------------- 会话生命周期 ----------------
@@ -784,11 +970,11 @@ public class TabChat extends Tab {
                     renderRecords(r.optJSONArray("records"));
                     c.begin("sessions.watch", watchParams());
                     startPump();
-                    act.ui(new Runnable() {
-                        public void run() {
-                            setStatus("已连接 · " + TabSessions.shortId(sessionId), Ui.GREEN);
-                        }
-                    });
+                    refreshHostState("connect");          // 按钮语义先按 host 的真实状态摆好
+                    startStateWatch();
+                    refreshInbox();                       // host 那边还排着的消息，坞里也得有
+                    statusBase = "已连接 · " + TabSessions.shortId(sessionId);
+                    setStateStatus();
                 } catch (final Exception e) {
                     conn = null;
                     act.ui(new Runnable() {
@@ -816,12 +1002,15 @@ public class TabChat extends Tab {
         accepted = false;
         turnStarted = false;
         streaming = false;
+        hostRunning = false;
+        hostStateKnown = false;
         deltaCount = 0;
         promptId = -1;
     }
 
     private void stopWatch() {
         stopPump = true;
+        stopStateWatch();
         final Dsh c = conn;
         conn = null;
         act.bg(new Runnable() {
@@ -871,6 +1060,7 @@ public class TabChat extends Tab {
             watchTries = 0;
             act.ui(new Runnable() {
                 public void run() {
+                    statusBase = "已连接 · " + TabSessions.shortId(sessionId);
                     setStatus("连接已恢复", Ui.GREEN);
                 }
             });
@@ -904,10 +1094,9 @@ public class TabChat extends Tab {
                         public void run() {
                             cv.clear();
                             renderRecords(recs);
-                            streaming = false;
-                            streamingUi(false);
                         }
                     });
+                    refreshHostState("reconnect");           // 重连后以 host 现场为准
                 } catch (Exception ignored) {
                     // 补不上就算了，下次重连还会再试
                 }
@@ -937,8 +1126,9 @@ public class TabChat extends Tab {
                         act.ui(new Runnable() {
                             public void run() {
                                 cv.noteQuiet("↻ 连接中断，正在自动重连（漏掉的内容会自动补齐）", Ui.AMBER);
-                                setStatus("连接中断 · 重连中…", Ui.AMBER);
-                                streamingUi(false);          // 绝不把输入框锁死
+                                statusBase = "连接中断 · 重连中…";
+                                setStatus(statusBase, Ui.AMBER);
+                                // 按钮保持最后一次从 host 读到的状态：断线期间猜不出真相，就不猜
                             }
                         });
                         retryWatch();                        // 换连接 + 重新 watch
@@ -959,22 +1149,21 @@ public class TabChat extends Tab {
         if (promptId > 0 && frame.optInt("id", -1) == promptId) {
             if (frame.optBoolean("ok", false)) {
                 accepted = true;
-                final boolean running = turnStarted;
                 act.ui(new Runnable() {
                     public void run() {
-                        streamingUi(true);
-                        setStatus(running ? "排队中（当前回合运行）" : "已发送", Ui.GREEN);
+                        setStatus(turnStarted ? "排队中（当前回合运行）" : "已发送", Ui.GREEN);
                     }
                 });
+                refreshHostState("prompt-ack");        // 按钮/状态文本随后归位到 host 的真实状态
             } else {
                 final JSONObject err = frame.optJSONObject("error");
                 final String msg = err == null ? frame.toString() : err.optString("message", err.toString());
                 act.ui(new Runnable() {
                     public void run() {
                         cv.note("发送被拒：" + msg, Ui.RED);
-                        streamingUi(false);
                     }
                 });
+                refreshHostState("prompt-reject");
             }
         } else if (frame.has("error")) {
             final JSONObject err = frame.optJSONObject("error");
@@ -989,6 +1178,12 @@ public class TabChat extends Tab {
 
     private void onEvent(String event, JSONObject data) {
         if (data == null) data = new JSONObject();
+        long now = System.currentTimeMillis();
+        lastEventAt = now;
+        if (sentAt > 0 && !"snapshot".equals(event)) {     // 首包延迟：局域网里应该是几十毫秒
+            logSend("首包 " + event + " +" + (now - sentAt) + "ms");
+            sentAt = 0;
+        }
         if ("snapshot".equals(event)) {
             base = data.optLong("cursor", -1);
             return;
@@ -1022,8 +1217,8 @@ public class TabChat extends Tab {
                 });
                 return;
             }
-            // 正文增量才需要等回合开始：回执慢/丢会把整段流式吞掉
-            if (!turnStarted || chunk.length() == 0) return;
+            // 正文增量才需要等回合开始：回执慢/丢会把整段流式吞掉（host 说在跑也算数）
+            if ((!turnStarted && !hostRunning) || chunk.length() == 0) return;
             logFrame("T-pass", chunk);
             deltaCount++;
             if (deltaCount == 1) {
@@ -1042,6 +1237,20 @@ public class TabChat extends Tab {
             });
             return;
         }
+        if ("tool-delta".equals(event)) {
+            // 工具行先出现，参数边长边补 —— harness 的 preparing 态
+            final String cid = data.optString("callId", "");
+            if (cid.length() == 0) return;
+            final String tname = data.optString("name", "");
+            final String chunk = data.optString("text", "");
+            logFrame("tool-delta", chunk);
+            act.ui(new Runnable() {
+                public void run() {
+                    cv.toolDelta(cid, tname, chunk);
+                }
+            });
+            return;
+        }
         if (!"event".equals(event)) return;
         long seq = data.optLong("seq", -1);
         if (base >= 0 && seq >= 0 && seq <= base) return;
@@ -1056,16 +1265,30 @@ public class TabChat extends Tab {
         if ("turn-end".equals(kind)) {
             if (turnStarted) {
                 turnStarted = false;
-                streaming = false;
-                final String reason = data.optString("reason", "");
+                final JSONObject rs = data.optJSONObject("reason");
+                final String rk = rs != null ? rs.optString("kind", "") : data.optString("reason", "");
+                final String rcode = rs == null ? "" : rs.optString("code", "");
+                final String rmsg = rs == null ? "" : rs.optString("message", "");
+                final String rcause = rs == null ? "" : rs.optString("cause", "");
                 act.ui(new Runnable() {
                     public void run() {
                         cv.thinkEnd();                    // 只思考、没正文也要把那一行留下
                         cv.botEnd();
-                        streamingUi(false);
-                        setStatus("回合结束 " + reason, Ui.DIM);
+                        // 这轮怎么收的，得说清楚：额度用尽/上下文超限以前是「什么都没发生」
+                        if ("error".equals(rk)) {
+                            cv.fail(rmsg, rcode);
+                        } else if ("aborted".equals(rk)) {
+                            cv.note("\u2298 \u5DF2\u6253\u65AD" + (rcause.length() > 0 ? " \u00B7 " + rcause : ""), Ui.DIM);
+                        } else if ("max-tokens".equals(rk)) {
+                            cv.note("\u26A0 \u8FBE\u5230\u8F93\u51FA\u4E0A\u9650\uFF08max-tokens\uFF09", Ui.AMBER);
+                        } else if ("blocked".equals(rk)) {
+                            cv.note("\u26A0 \u672C\u8F6E\u88AB\u62E6\u622A\uFF08blocked\uFF09", Ui.DIM);
+                        } else if (rk.length() > 0 && !"completed".equals(rk)) {
+                            cv.note("\u2014 \u56DE\u5408\u7ED3\u675F \u00B7 " + rk, Ui.DIM);
+                        }
                     }
                 });
+                refreshHostState("turn-end");             // 队列里还有就仍是"停止发送"，不自己判空
                 flushPending();
             }
             return;
@@ -1076,14 +1299,33 @@ public class TabChat extends Tab {
         }
         if ("user".equals(kind)) {
             final String ut = data.optString("text", "");
-            if (isMine(ut)) return;                  // 自己发的本地已渲染过，别重复
-            if (looksInjected(ut)) {
-                act.ui(new Runnable() {
-                    public void run() {
-                        cv.inject(DshConsole.clamp(ut, 60000));
-                    }
-                });
+            if (isMine(ut)) {
+                // host 把这条记进会话了（这才叫真落地）→ 坞里那行可以撤了
+                final Queued done = queuedByText(ut);
+                if (done != null) {
+                    act.ui(new Runnable() {
+                        public void run() {
+                            queue.remove(done);
+                            renderQueue();
+                        }
+                    });
+                }
+                return;                              // 自己发的本地已渲染过，别重复
             }
+            final ArrayList<Img> uim = Img.list(data.optJSONArray("images"));
+            act.ui(new Runnable() {
+                public void run() {
+                    if (looksInjected(ut)) {
+                        cv.inject(DshConsole.clamp(ut, 60000));
+                    } else if (ut.length() > 0) {
+                        cv.user(DshConsole.clamp(ut, 4000));   // 电脑端发的（含带图）也要显示
+                    }
+                    if (!uim.isEmpty()) {
+                        logImg("live user images n=" + uim.size());
+                        cv.images(uim, false);
+                    }
+                }
+            });
             return;
         }
         final JSONObject rec = data;
@@ -1214,23 +1456,41 @@ public class TabChat extends Tab {
         String kind = r.optString("kind", r.optString("type", "?"));
         if ("user".equals(kind)) {
             String txt = r.optString("text", "");
+            ArrayList<Img> imgs = Img.list(r.optJSONArray("images"));
+            if (!imgs.isEmpty()) logImg("user images n=" + imgs.size());
             // 协议层不区分「我自己发的」和「host 注入的运行期上下文」，两者都是 user 记录：
             // 发出去的原文见过 → 用户气泡；否则按注入上下文折叠展示。
             if (!isMine(txt) && looksInjected(txt)) cv.inject(DshConsole.clamp(txt, 60000));
-            else cv.user(DshConsole.clamp(txt, 4000));
+            else if (txt.length() > 0) cv.user(DshConsole.clamp(txt, 4000));
+            if (!imgs.isEmpty()) cv.images(imgs, true);      // 历史里的图：先画占位，真要显示再去 host 取
+        } else if ("inbox".equals(kind)) {
+            applyQueueSplice(r.optJSONArray("inserted")); // 队列变了：重新跟 host 对一次账
         } else if ("assistant".equals(kind)) {
-            cv.bot(DshConsole.clamp(r.optString("text", ""), 8000));
+            String at = r.optString("text", "");
+            if (at.length() > 0) cv.bot(DshConsole.clamp(at, 8000));
+            ArrayList<Img> aim = Img.list(r.optJSONArray("images"));
+            if (!aim.isEmpty()) {
+                logImg("assistant images n=" + aim.size() + " id=" + aim.get(0).attachmentId);
+                cv.images(aim, false);                      // agent 自己产出的图（截图 / read_image）
+            }
         } else if ("tool-call".equals(kind)) {
             String tn = r.optString("name", "?");
             toolNames.add(tn);
-            cv.tool(tn, r.optString("arguments", ""));
+            // callId 是 host 新加的：有了它，结果才能落回自己那一行（而不是塞给最后一行）
+            cv.tool(r.optString("callId", ""), tn, r.optString("arguments", ""));
         } else if ("tool-result".equals(kind)) {
             JSONObject e = r.optJSONObject("error");
+            String cid = r.optString("callId", "");
             if (e != null) {
-                cv.toolResult("[" + e.optString("name", "error") + "] "
-                        + e.optString("reason", e.optString("code", "")), true);
+                cv.toolResult(cid, "[" + e.optString("name", "error") + "] "
+                        + e.optString("reason", e.optString("code", "")), true, false);
             } else {
-                cv.toolResult(r.optString("text", ""), false);
+                cv.toolResult(cid, r.optString("text", ""), false, false);
+            }
+            ArrayList<Img> tim = Img.list(r.optJSONArray("images"));
+            if (!tim.isEmpty()) {
+                logImg("tool images n=" + tim.size() + " id=" + tim.get(0).attachmentId);
+                cv.images(tim, false);                      // 工具产出的图（read_image / 截图）挂在它下面
             }
         } else if ("event".equals(kind)) {
             String ty = r.optString("type", "");
@@ -1249,54 +1509,42 @@ public class TabChat extends Tab {
 
     // ---------------- 发送 / 打断 / 历史 ----------------
 
-    /** 默认发送 = 挂机等：进队列，等当前回合跑完再执行（harness 的默认行为）。 */
+    /** 默认发送 = 挂机等：交给 host 进队列，当前回合跑完自动跑（跟 harness 一样，不拦在本地）。 */
     private void send() {
-        final String text = input.getText().toString().trim();
-        if (text.length() == 0) {
-            return;
-        }
-        if (sessionId.length() == 0) {
-            act.toast("先在侧边栏新建或选择对话");
-            act.openDrawer();
-            return;
-        }
-        if (streaming) {
-            // 本地挂起：不推给 host —— 协议没有"撤回排队消息"的方法，先发出去就再也提前不了
-            input.setText("");
-            pending.add(text);
-            cv.pendingUser(DshConsole.clamp(text, 4000), new View.OnClickListener() {
-                public void onClick(View v) {
-                    if (!pending.remove(text)) {
-                        return;
-                    }
-                    markMine(text);
-                    post(text, "steer");
-                    cv.note("⏎ 插话 · 立即提交", Ui.DIM);
-                }
-            });
-            setStatus("已挂起 " + pending.size() + " 条 · 等回合结束", Ui.AMBER);
-            return;
-        }
-        send("queue");
+        submit("queue");
     }
 
     /** mode: queue=排队挂机等；steer=立刻插进当前回合（就是旁边那个 ⏎ 键）。 */
     private void send(final String modeArg) {
+        submit(modeArg);
+    }
+
+    /** 统一发送入口：文字 + 待发图片一起走；发出去就在输入卡上挂一条「排队中」。 */
+    private void submit(final String modeArg) {
         final String text = input.getText().toString().trim();
-        if (text.length() == 0) return;
+        final ArrayList<Img> imgs = new ArrayList<Img>(attachments);
+        if (text.length() == 0 && imgs.isEmpty()) return;
         if (sessionId.length() == 0) {
             act.toast("先在侧边栏新建或选择对话");
             act.openDrawer();
             return;
         }
         input.setText("");
-        markMine(text);                        // 记账：这条是我发的，历史里别当注入
-        cv.user(DshConsole.clamp(text, 4000));
-        post(text, modeArg);
+        clearAttachments();
+        if (text.length() > 0) markMine(text);               // 记账：这条是我发的，历史里别当注入
+        if (text.length() > 0) cv.user(DshConsole.clamp(text, 4000));
+        if (!imgs.isEmpty()) cv.images(imgs, true);          // 本机图片先本地亮出来，别等 host 回程
+        final Queued row = new Queued();
+        row.text = text;
+        row.imgs = imgs;
+        row.rpcId = java.util.UUID.randomUUID().toString();  // 自己铸 id：发出去之前就知道自己是谁
+        queue.add(row);
+        renderQueue();
+        post(text, imgs, modeArg, row);
     }
 
     /** 真正把一条消息推给 host（mode: queue=等回合结束 / steer=立刻插进去）。 */
-    private void post(final String text, final String modeArg) {
+    private void post(final String text, final ArrayList<Img> imgs, final String modeArg, final Queued row) {
         deltaCount = 0;
         accepted = false;
         turnStarted = true;
@@ -1306,30 +1554,169 @@ public class TabChat extends Tab {
             loadSession(sessionId, sessionTitle);
             return;
         }
-        final String mode = modeArg;
-        streaming = true;      // ← 以前只设了 turnStarted，streaming 永远是 false：■ 按下去走 send() 排队，停不下来
-        streamingUi(true);
-        setStatus("发送中…", Ui.AMBER);
+        setStatus("steer".equals(modeArg) ? "插话中…" : "已交给 host 排队…", Ui.AMBER);
         act.bg(new Runnable() {
             public void run() {
                 try {
                     JSONObject p = new JSONObject();
                     p.put("sessionId", sessionId);
-                    p.put("mode", mode);
+                    p.put("mode", modeArg);
                     p.put("text", text);
-                    p.put("images", new JSONArray());
+                    p.put("requestId", row == null ? "" : row.rpcId);
+                    JSONArray arr = new JSONArray();
+                    if (imgs != null) {
+                        for (int i = 0; i < imgs.size(); i++) arr.put(imgs.get(i).sendPayload());
+                    }
+                    p.put("images", arr);
+                    sentAt = System.currentTimeMillis();
+                    lastEventAt = sentAt;
                     promptId = c.begin("sessions.prompt", p);
+                    logSend("prompt 已发出 mode=" + modeArg + " textLen=" + text.length()
+                            + " imgs=" + (imgs == null ? 0 : imgs.size())
+                            + " rid=" + (row == null ? "-" : row.rpcId));
+                    act.ui(new Runnable() {
+                        public void run() {
+                            if (row != null) {
+                                row.sending = false;    // 已经交出去了，接下来以 host 的信箱为准
+                                renderQueue();
+                            }
+                        }
+                    });
+                    try {
+                        Thread.sleep(600);           // 等 host 把这条记进队列，再对一次账
+                    } catch (InterruptedException ignored) {
+                    }
+                    refreshInbox();
+                    try {
+                        Thread.sleep(3400);          // 局域网里 4 秒还没任何回包 = 不正常
+                    } catch (InterruptedException ignored) {
+                    }
+                    if (lastEventAt <= sentAt) {     // 一个包都没回来，才去查 tail / 重发
+                        logSend("4 秒无回包 → 进确认流程");
+                        verifyPrompt(text, p, row);
+                    }
                 } catch (final Exception e) {
                     act.ui(new Runnable() {
                         public void run() {
+                            if (row != null) {
+                                queue.remove(row);   // 根本没递出去，别在坞里骗人
+                                renderQueue();
+                            }
                             cv.note("发送失败：" + e.getMessage(), Ui.RED);
-                            streaming = false;
-                            streamingUi(false);
                         }
                     });
+                    refreshHostState("send-fail");
                 }
             }
         });
+    }
+
+    /**
+     * 发出后确认：`sessions.tail` 里能不能看到这条 user 记录。
+     * 「发出去了但迟迟没反应」多半是这条根本没落地（socket 半死 / 被 host 拒了），
+     * 这里发现没落地就换一条连接重发一次，并且把话说给用户听。
+     */
+    private void verifyPrompt(final String text, final JSONObject params, final Queued row) {
+        if (sessionId.length() == 0) return;
+        act.bg(new Runnable() {
+            public void run() {
+                Dsh one = null;
+                Boolean found = null;
+                try {
+                    one = act.openDsh(9000);
+                    JSONObject q = new JSONObject();
+                    q.put("sessionId", sessionId);
+                    q.put("limit", 12);
+                    JSONObject r = one.request("sessions.tail", q, 20000, null);
+                    JSONArray recs = r.optJSONArray("records");
+                    found = Boolean.FALSE;
+                    if (recs != null) {
+                        for (int i = 0; i < recs.length(); i++) {
+                            JSONObject rec = recs.optJSONObject(i);
+                            if (rec == null || !"user".equals(rec.optString("kind", ""))) continue;
+                            String t = rec.optString("text", "").trim();
+                            if (text.length() > 0 ? text.equals(t) : true) {
+                                found = Boolean.TRUE;
+                                break;
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    logSend("verify 查不了（" + t + "），跳过");
+                    return;
+                } finally {
+                    if (one != null) {
+                        try {
+                            one.close();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+                final boolean ok = found != null && found.booleanValue();
+                logSend("verify " + (ok ? "ok" : "未落地"));
+                if (ok) {
+                    if (conn == null || !conn.alive()) {          // 消息进了会话，但我们的流可能已经死了
+                        logSend("连接不健康 → 重挂监听");
+                        act.ui(new Runnable() {
+                            public void run() {
+                                cv.note("连接掉了，正在重连…", Ui.AMBER);
+                                loadSession(sessionId, sessionTitle);
+                            }
+                        });
+                    }
+                    return;
+                }
+                act.ui(new Runnable() {
+                    public void run() {
+                        cv.note("host 没收到这条（连接半死或被拒），换条连接重发…", Ui.AMBER);
+                    }
+                });
+                resend(params, row);
+            }
+        });
+    }
+
+    /** 兜底重发：走一条全新的短连接，直接把同一条 prompt 再递一次。 */
+    private void resend(final JSONObject params, final Queued row) {
+        act.bg(new Runnable() {
+            public void run() {
+                Dsh one = null;
+                try {
+                    one = act.openDsh(9000);
+                    JSONObject r = one.request("sessions.prompt", params, 60000, null);
+                    boolean accepted = r.optBoolean("accepted", true);
+                    logSend("重发 " + (accepted ? "成功" : "被拒") + " " + r);
+                    final boolean ok = accepted;
+                    act.ui(new Runnable() {
+                        public void run() {
+                            cv.note(ok ? "已重发 · 等 host 跑" : "重发被 host 拒绝", ok ? Ui.DIM : Ui.RED);
+                        }
+                    });
+                } catch (final Exception e) {
+                    logSend("重发失败: " + e);
+                    act.ui(new Runnable() {
+                        public void run() {
+                            cv.note("重发失败：" + e.getMessage(), Ui.RED);
+                        }
+                    });
+                } finally {
+                    if (one != null) {
+                        try {
+                            one.close();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /** 发送链路的诊断日志：`logcat -s DshSend` 看这条。 */
+    private static void logSend(String msg) {
+        try {
+            android.util.Log.i("DshSend", msg);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 打断当前回合（也供侧边栏菜单调用）。 */
@@ -1350,6 +1737,11 @@ public class TabChat extends Tab {
                             cv.note("已请求打断当前回合", Ui.AMBER);
                         }
                     });
+                    try {
+                        Thread.sleep(1200);           // 打断是异步的：等 host 真停下来再问状态
+                    } catch (InterruptedException ignored) {
+                    }
+                    refreshHostState("cancel");
                 } catch (final Exception e) {
                     act.toast("打断失败：" + e.getMessage());
                 }
@@ -1429,5 +1821,360 @@ public class TabChat extends Tab {
                 }
             }
         });
+    }
+
+    // ==================== 图片：选图 / 待发缩略条 ====================
+
+    /** ＋ 号走系统选择器（不需要任何存储权限）。 */
+    private void pickImage() {
+        try {
+            android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+            it.setType("image/*");
+            it.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+            it.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true);
+            act.startActivityForResult(android.content.Intent.createChooser(it, "选图片"), REQ_PICK_IMAGE);
+        } catch (Throwable t) {
+            act.toast("打不开相册：" + t.getMessage());
+        }
+    }
+
+    /** 选择器回来的结果（由 MainActivity.onActivityResult 转发）。 */
+    public void onPickResult(android.content.Intent data) {
+        if (data == null) return;
+        final List<android.net.Uri> uris = new ArrayList<android.net.Uri>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                android.net.Uri u = data.getClipData().getItemAt(i).getUri();
+                if (u != null) uris.add(u);
+            }
+        }
+        if (data.getData() != null) uris.add(data.getData());
+        if (uris.isEmpty()) return;
+        act.toast("正在压图…");
+        act.bg(new Runnable() {
+            public void run() {
+                int ok = 0;
+                String bad = null;
+                for (int i = 0; i < uris.size(); i++) {
+                    try {
+                        final Img img = Img.fromUri(act, uris.get(i));
+                        act.ui(new Runnable() {
+                            public void run() {
+                                attachments.add(img);
+                                renderAttachments();
+                            }
+                        });
+                        ok++;
+                    } catch (Exception e) {
+                        bad = e.getMessage();
+                    }
+                }
+                final int n = ok;
+                final String err = bad;
+                act.ui(new Runnable() {
+                    public void run() {
+                        if (n == 0) act.toast(err == null ? "这几张图都没法用" : err);
+                        else if (err != null) act.toast("加了 " + n + " 张，有张不行：" + err);
+                    }
+                });
+            }
+        });
+    }
+
+    private void clearAttachments() {
+        attachments.clear();
+        renderAttachments();
+    }
+
+    /** 待发图片：一排圆角缩略图，右上角 ✕ 撤掉。 */
+    private void renderAttachments() {
+        if (attStrip == null) return;
+        attStrip.removeAllViews();
+        if (attachments.isEmpty()) {
+            attStrip.setVisibility(View.GONE);
+            return;
+        }
+        attStrip.setVisibility(View.VISIBLE);
+        for (int i = 0; i < attachments.size(); i++) {
+            final Img img = attachments.get(i);
+            final android.widget.FrameLayout cell = new android.widget.FrameLayout(act);
+            android.widget.ImageView iv = new android.widget.ImageView(act);
+            iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            iv.setBackground(Ui.bg(Ui.SURF3, 12, act));
+            iv.setImageBitmap(img.bmp);
+            cell.addView(iv, new android.widget.FrameLayout.LayoutParams(
+                    Ui.dp(act, 62), Ui.dp(act, 62)));
+            TextView del = Ui.tv(act, "✕", 10.5f, 0xFFFFFFFF);
+            del.setGravity(Gravity.CENTER);
+            del.setBackground(Ui.bg(0xE0222222, 9, act));
+            android.widget.FrameLayout.LayoutParams dlp =
+                    new android.widget.FrameLayout.LayoutParams(Ui.dp(act, 18), Ui.dp(act, 18));
+            dlp.gravity = Gravity.TOP | Gravity.END;
+            cell.addView(del, dlp);
+            del.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    attachments.remove(img);
+                    renderAttachments();
+                }
+            });
+            iv.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    Img.view(act, img);
+                }
+            });
+            LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(Ui.dp(act, 62), Ui.dp(act, 62));
+            lp.rightMargin = Ui.dp(act, 8);
+            attStrip.addView(cell, lp);
+        }
+    }
+
+    // ==================== 队列坞：已交给 host 还没跑的消息 ====================
+
+    /** 排队中的消息挂在输入卡上方：能撤回、能插话（harness 的 queued 行就是干这个的）。 */
+    private void renderQueue() {
+        if (queueDock == null) return;
+        queueDock.removeAllViews();
+        if (queue.isEmpty()) {
+            queueDock.setVisibility(View.GONE);
+            return;
+        }
+        queueDock.setVisibility(View.VISIBLE);
+        for (int i = 0; i < queue.size(); i++) {
+            final Queued row = queue.get(i);
+            LinearLayout line = Ui.row(act);
+            line.setGravity(Gravity.CENTER_VERTICAL);
+            line.setBackground(Ui.bg(Ui.SURF2, 14, act));
+            int hp = Ui.dp(act, 8);
+            line.setPadding(hp, Ui.dp(act, 6), hp, Ui.dp(act, 6));
+            TextView mark = Ui.tv(act, row.sending ? "…" : "⏳", 12.5f, Ui.AMBER);
+            line.addView(mark);
+            String head = safe(row.text);
+            String show = head.length() == 0 ? "(图片 " + row.imgs.size() + " 张)" : DshConsole.clamp(head, 60);
+            if (!row.imgs.isEmpty() && head.length() > 0) show = "🖼 " + show;
+            TextView tv = Ui.tv(act, show, 12.5f, Ui.DIM);
+            tv.setSingleLine(true);
+            tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            tlp.leftMargin = Ui.dp(act, 6);
+            line.addView(tv, tlp);
+            if (row.sending) {
+                line.addView(chip("未送出", Ui.DIM, null));
+            } else if (row.itemId.length() == 0) {
+                line.addView(chip("已送出 · 等 host 回执", Ui.DIM, null));
+            } else {
+                line.addView(chip("撤回", Ui.RED, new View.OnClickListener() {
+                    public void onClick(View v) {
+                        queueAction(row, "remove");
+                    }
+                }));
+                line.addView(chip("⏎ 插话", Ui.ACCENT, new View.OnClickListener() {
+                    public void onClick(View v) {
+                        queueAction(row, "steer");
+                    }
+                }));
+            }
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            llp.bottomMargin = Ui.dp(act, 5);
+            queueDock.addView(line, llp);
+        }
+    }
+
+    private TextView chip(String label, int color, View.OnClickListener click) {
+        TextView t = Ui.tv(act, label, 11.5f, color);
+        t.setPadding(Ui.dp(act, 9), Ui.dp(act, 4), Ui.dp(act, 9), Ui.dp(act, 4));
+        t.setBackground(Ui.bg(Ui.CARD, 12, act));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = Ui.dp(act, 6);
+        t.setLayoutParams(lp);
+        if (click != null) t.setOnClickListener(click);
+        return t;
+    }
+
+    private String safe(String s) {
+        return s == null ? "" : s.replace('\n', ' ');
+    }
+
+    /** 按 rpcId 或 host 的 itemId 认人。 */
+    private Queued queuedById(String key) {
+        if (key == null || key.length() == 0) return null;
+        for (int i = 0; i < queue.size(); i++) {
+            Queued q = queue.get(i);
+            if (key.equals(q.rpcId) || key.equals(q.itemId)) return q;
+        }
+        return null;
+    }
+
+    /** 撤回 / 插话：就地问 host 改队列，别自己猜结果。 */
+    private void queueAction(final Queued row, final String kind) {
+        final Dsh c = conn;
+        if (c == null) {
+            act.toast("还没连上 host");
+            return;
+        }
+        if (row.itemId.length() == 0) {
+            act.toast("host 还没确认这条，稍等一下");
+            return;
+        }
+        act.toast("steer".equals(kind) ? "插话中…" : "撤回中…");
+        act.bg(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", sessionId);
+                    p.put("itemId", row.itemId);
+                    JSONObject act1 = new JSONObject();
+                    act1.put("kind", kind);
+                    p.put("action", act1);
+                    c.begin("sessions.queue", p);
+                    act.ui(new Runnable() {
+                        public void run() {
+                            if ("steer".equals(kind)) {
+                                queue.remove(row);
+                                renderQueue();
+                                setStatus("已插话 · 立刻提交", Ui.ACCENT);
+                            } else {
+                                setStatus("已请求撤回…", Ui.DIM);
+                            }
+                        }
+                    });
+                    try {
+                        Thread.sleep(900);
+                    } catch (InterruptedException ignored) {
+                    }
+                    refreshInbox();                       // 到底成没成，以 host 的信箱为准
+                } catch (final Exception e) {
+                    act.ui(new Runnable() {
+                        public void run() {
+                            cv.note("队列操作失败：" + e.getMessage(), Ui.RED);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    /** host 的 inbox 事件：别自己猜 splice 语义，直接重新对一次账（轻量、且权威）。 */
+    private void applyQueueSplice(JSONArray inserted) {
+        long now = System.currentTimeMillis();
+        if (now - lastInboxAt < 500) return;              // 节流：一次变动会连着来好几条
+        lastInboxAt = now;
+        refreshInbox();
+    }
+
+    /** 跟 host 对账信箱：它在的我留着（并记下 itemId），它没有的就是已经跑起来了。 */
+    private void refreshInbox() {
+        if (sessionId.length() == 0) return;
+        final String sid = sessionId;
+        new Thread(new Runnable() {
+            public void run() {
+                Dsh c = null;
+                JSONObject snap = null;
+                boolean ok = false;
+                try {
+                    c = act.openDsh(9000);
+                    JSONObject p = new JSONObject();
+                    p.put("sessionId", sid);
+                    snap = c.request("sessions.inbox", p, 20000, null);
+                    ok = true;
+                } catch (Throwable ignored) {
+                    // 老版 host 没这个方法：问不到就当它管不了队列
+                } finally {
+                    if (c != null) {
+                        try {
+                            c.close();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+                final JSONObject s = snap;
+                final boolean good = ok;
+                act.ui(new Runnable() {
+                    public void run() {
+                        if (!sid.equals(sessionId)) return;       // 已经换会话了，这份快照作废
+                        if (good) adoptInbox(s);
+                        else dropStale();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void collectInbox(JSONArray arr, ArrayList<JSONObject> out) {
+        if (arr == null) return;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o != null) out.add(o);
+        }
+    }
+
+    private void adoptInbox(JSONObject snap) {
+        ArrayList<JSONObject> items = new ArrayList<JSONObject>();
+        collectInbox(snap == null ? null : snap.optJSONArray("nextTurn"), items);
+        collectInbox(snap == null ? null : snap.optJSONArray("nextStep"), items);
+        java.util.HashSet<String> alive = new java.util.HashSet<String>();
+        for (int i = 0; i < items.size(); i++) {
+            JSONObject o = items.get(i);
+            String itemId = o.optString("id", "");
+            String rid = o.optString("rpcId", "");
+            String txt = o.optString("text", "");
+            if (itemId.length() > 0) alive.add(itemId);
+            if (rid.length() > 0) alive.add(rid);
+            Queued row = rid.length() > 0 ? queuedById(rid) : null;
+            if (row == null && itemId.length() > 0) row = queuedById(itemId);
+            if (row == null) row = queuedByText(txt);          // 电脑上发的、本机没记过的
+            if (row == null) {
+                row = new Queued();
+                row.rpcId = rid;
+                row.text = txt;
+                row.imgs = Img.list(o.optJSONArray("images"));
+                queue.add(row);
+            }
+            row.itemId = itemId;
+            row.sending = false;
+        }
+        for (int i = queue.size() - 1; i >= 0; i--) {
+            Queued row = queue.get(i);
+            if (row.sending) continue;                        // 还在路上，先别动
+            if (alive.contains(row.itemId) || alive.contains(row.rpcId)) continue;
+            queue.remove(i);                                  // host 信箱里没有 → 它已经跑起来了
+        }
+        renderQueue();
+    }
+
+    /** 问不到信箱（老版 host）时别硬撑着显示「排队中」，过几秒就当它跑起来了。 */
+    private void dropStale() {
+        long now = System.currentTimeMillis();
+        boolean changed = false;
+        for (int i = queue.size() - 1; i >= 0; i--) {
+            Queued row = queue.get(i);
+            if (!row.sending && now - row.at > 300000) {   // 5 分钟还没等到 host 回程，才当它丢了
+                queue.remove(i);
+                changed = true;
+            }
+        }
+        if (changed) renderQueue();
+    }
+
+    private Queued queuedByText(String text) {
+        if (text == null || text.length() == 0) return null;
+        for (int i = 0; i < queue.size(); i++) {
+            Queued q = queue.get(i);
+            if (q.text != null && q.text.trim().equals(text.trim())) return q;
+        }
+        return null;
+    }
+
+    /** 一条排队消息：本机在等 host 跑的，就在这儿记着。 */
+    static final class Queued {
+        String rpcId = "";
+        String itemId = "";               // host 记录 id：撤回 / 插话都拿它办事
+        String text = "";
+        List<Img> imgs = new ArrayList<Img>();
+        boolean sending = true;
+        long at = System.currentTimeMillis();
     }
 }

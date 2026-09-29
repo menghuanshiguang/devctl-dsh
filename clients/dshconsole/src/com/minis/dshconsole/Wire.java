@@ -14,6 +14,9 @@ public class Wire {
     private final OutputStream out;
     private byte[] buf = new byte[16384];
     private int len = 0;
+    /** 读、写各自一把锁：写不能被「正在等对端回包的读」挡住（那会让发送凭空慢一截）。 */
+    private final Object readLock = new Object();
+    private final Object writeLock = new Object();
 
     public Wire(Socket s) throws Exception {
         sock = s;
@@ -26,9 +29,11 @@ public class Wire {
         return sock;
     }
 
-    public synchronized void send(String line) throws Exception {
-        out.write((line + "\n").getBytes(UTF8));
-        out.flush();
+    public void send(String line) throws Exception {
+        synchronized (writeLock) {
+            out.write((line + "\n").getBytes(UTF8));
+            out.flush();
+        }
     }
 
     private int findNewline() {
@@ -39,7 +44,8 @@ public class Wire {
     }
 
     /** 返回一行（无换行符）；超时且无完整行返回 null；连接关闭抛异常。 */
-    public synchronized String readLine(int timeoutMs) throws Exception {
+    public String readLine(int timeoutMs) throws Exception {
+        synchronized (readLock) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (true) {
             int nl = findNewline();
@@ -65,6 +71,7 @@ public class Wire {
             } catch (java.net.SocketTimeoutException e) {
                 return null;
             }
+        }
         }
     }
 

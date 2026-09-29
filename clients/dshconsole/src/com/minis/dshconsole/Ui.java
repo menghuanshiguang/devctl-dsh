@@ -439,6 +439,47 @@ public class Ui {
 
     /** \u7ad6\u8f68\uff1a\u5728 x \u5904\u753b\u4e00\u6761 w \u5bbd\u7684\u7ec6\u7ebf\uff0c\u4e0a\u4e0b\u5404\u7559 inset\uff0c\u7ed9\u8f68\u8ff9\u65f6\u95f4\u7ebf\u5f53\u80cc\u666f\u3002 */
     /** 限高的 ScrollView：思考面板正文用它，最高 maxH，超出就在内部滚。 */
+    /** 运行中的一行：一道高光从左扫到右（harness 的 TextShimmer，把整行的文字一起扫）。 */
+    private static final java.util.WeakHashMap<TextView, android.animation.ValueAnimator> SHIMMERS =
+            new java.util.WeakHashMap<TextView, android.animation.ValueAnimator>();
+
+    public static void shimmer(final TextView tv, final int base, final int hi) {
+        if (SHIMMERS.containsKey(tv)) return;          // 已经扫着就别重开：流式里 paint 会反复调
+        stopShimmer(tv);
+        final int span = dp(tv.getContext(), 90);
+        final android.graphics.LinearGradient g = new android.graphics.LinearGradient(
+                -span, 0, 0, 0, new int[]{base, hi, base}, new float[]{0f, 0.45f, 1f},
+                android.graphics.Shader.TileMode.CLAMP);
+        tv.setTextColor(base);
+        tv.getPaint().setShader(g);
+        android.animation.ValueAnimator an = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        an.setDuration(1500);
+        an.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        an.setInterpolator(new android.view.animation.LinearInterpolator());
+        an.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator a) {
+                float t = ((Float) a.getAnimatedValue()).floatValue();
+                float x = -span + t * (span * 2 + tv.getWidth());
+                android.graphics.Matrix m = new android.graphics.Matrix();
+                m.setTranslate(x, 0);
+                g.setLocalMatrix(m);
+                tv.invalidate();
+            }
+        });
+        an.start();
+        SHIMMERS.put(tv, an);
+    }
+
+    /** 停下并还原成普通文字色（不做的话 shader 会一直挂在 paint 上）。 */
+    public static void stopShimmer(TextView tv) {
+        android.animation.ValueAnimator an = SHIMMERS.remove(tv);
+        if (an != null) an.cancel();
+        if (tv.getPaint().getShader() != null) {
+            tv.getPaint().setShader(null);
+            tv.invalidate();
+        }
+    }
+
     public static class MaxScroll extends android.widget.ScrollView {
         public int maxH = 0;
         public MaxScroll(android.content.Context c) {
