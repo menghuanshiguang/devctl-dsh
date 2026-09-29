@@ -50,6 +50,26 @@ public class Sidebar {
         info.setPadding(0, Ui.dp(a, 2), 0, Ui.dp(a, 4));
         root.addView(info);
 
+        // 搜索框：只过滤已经拉到本地的列表，不打网络
+        final android.widget.EditText q = new android.widget.EditText(a);
+        q.setHint("搜索会话…");
+        q.setSingleLine(true);
+        q.setTextSize(13.5f);
+        q.setTextColor(Ui.TEXT);
+        q.setHintTextColor(Ui.MUT);
+        q.setBackground(Ui.surf(Ui.SURF2, 12, a));
+        q.setPadding(Ui.dp(a, 14), Ui.dp(a, 9), Ui.dp(a, 14), Ui.dp(a, 9));
+        root.addView(q);
+        q.addTextChangedListener(new android.text.TextWatcher() {
+            public void afterTextChanged(android.text.Editable ed) {
+                query = ed.toString().trim();
+                renderSessions(allSess);
+                renderWorkspaces(allWs);
+            }
+            public void beforeTextChanged(CharSequence s, int st, int c, int af) { }
+            public void onTextChanged(CharSequence s, int st, int bf, int c) { }
+        });
+
         ScrollView sc = new ScrollView(a);
         sc.setVerticalScrollBarEnabled(false);
         LinearLayout list = Ui.col(a);
@@ -292,9 +312,11 @@ public class Sidebar {
     /** 二次列表里的子行：左侧缩进，颜色压暗，跟父节点区分开。 */
     private View subRow(String title, String sub, boolean active, Runnable onClick, Runnable onLong) {
         LinearLayout wrap = Ui.col(act);
-        wrap.setPadding(Ui.dp(act, 18), 0, 0, 0);
-        wrap.setPadding(Ui.dp(act, 14), 0, 0, 0);               // 子项靠缩进，不用 └ 树字符
-        wrap.addView(row(title, sub, active, onClick, onLong, active ? Ui.TEXT : Ui.DIM));
+        wrap.setPadding(Ui.dp(act, 12), 0, 0, 0);                // 子项靠缩进，不用 └ 树字符
+        LinearLayout pill = Ui.col(act);
+        pill.setBackground(Ui.surf(active ? Ui.CHIP_BG : Ui.SURF, Ui.R_CHIP, act));
+        pill.addView(row(title, sub, false, onClick, onLong, active ? Ui.ACCENT : Ui.DIM));
+        wrap.addView(pill);
         return wrap;
     }
 
@@ -334,6 +356,7 @@ public class Sidebar {
     private void renderSessions(JSONArray items) {
         sessBox.removeAllViews();
         int n = 0;
+        String lastBucket = "";                              // 时间分段：今天 / 7 天内 / 30 天内 / 年月
         if (items != null) {
             for (int i = 0; i < items.length(); i++) {
                 JSONObject s = items.optJSONObject(i);
@@ -350,6 +373,15 @@ public class Sidebar {
                     sub = sub + " · " + TabSessions.shortId(id);
                 }
                 final String t2 = title.length() > 0 ? title : "(未命名)";
+                if (query.length() > 0) {                        // 搜索：标题或副标题命中才留
+                    String ql = query.toLowerCase();
+                    if (!t2.toLowerCase().contains(ql) && !sub.toLowerCase().contains(ql)) continue;
+                }
+                String bk = bucket(s.optLong("updatedAt", 0));
+                if (!bk.equals(lastBucket)) {
+                    sessBox.addView(section(bk, "", null));
+                    lastBucket = bk;
+                }
                 final JSONObject so = s;
                 final boolean active = id.equals(act.chatTab().currentSessionId());
                 sessBox.addView(row(t2, sub, active, new Runnable() {
@@ -372,6 +404,7 @@ public class Sidebar {
     // ---------------- 动作 ----------------
 
     /** 工作区二次列表：缓存 list 结果，展开/收起纯本地渲染，不再打网络。 */
+    private String query = "";                              // 侧栏搜索框的过滤词（本地过滤）
     private JSONArray allWs = null;
     private JSONArray allSess = null;
     private final java.util.HashSet<String> openWs = new java.util.HashSet<String>();
@@ -575,7 +608,7 @@ public class Sidebar {
         row.addView(t);
         View sp = new View(act);
         row.addView(sp, new LinearLayout.LayoutParams(0, 1, 1f));
-        row.addView(icon(action, r));
+        if (action != null && action.length() > 0) row.addView(icon(action, r));   // 空动作就不摆按钮
         return row;
     }
 
@@ -609,6 +642,18 @@ public class Sidebar {
         return t;
     }
 
+    /** 会话列表的时间分段：今天 / 7 天内 / 30 天内 / 年月。 */
+    private String bucket(long t) {
+        if (t <= 0) return "更早";
+        long d = System.currentTimeMillis() - t;
+        if (d < 86400000L) return "今天";
+        if (d < 7 * 86400000L) return "7 天内";
+        if (d < 30 * 86400000L) return "30 天内";
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(t);
+        return c.get(java.util.Calendar.YEAR) + " 年 " + (c.get(java.util.Calendar.MONTH) + 1) + " 月";
+    }
+
     /** 一行：标题 + 副标题，active 高亮，tap/long 两个动作。 */
     private View row(String title, String sub, boolean active, final Runnable tap,
                      final Runnable hold, int color) {
@@ -618,14 +663,13 @@ public class Sidebar {
         wrap.setPadding(Ui.dp(act, 14), Ui.dp(act, 8), Ui.dp(act, 14), Ui.dp(act, 8));
         int rr = Ui.dp(act, 16);                                // Minis：会话行圆角 16
         if (active) {
-            // 选中态 = 抬起一层的柔和底色块（Minis 是用底色块，不是画强调条）
-            wrap.setBackground(Ui.bg(Ui.SURF, rr, act));
+            wrap.setBackground(Ui.surf(Ui.CHIP_BG, rr, act));    // 选中 = 淡蓝底 + 细蓝边，跟胶囊一套
         } else {
             Ui.press(wrap, act, 0x00000000, rr);                 // 无底色 + 按压涟漪反馈
         }
 
         LinearLayout col = Ui.col(act);
-        TextView t = Ui.tv(act, title, 13.5f, color);
+        TextView t = Ui.tv(act, title, 13.5f, active ? Ui.ACCENT : color);   // 选中行整行转蓝
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         col.addView(t);
@@ -637,6 +681,18 @@ public class Sidebar {
         }
         wrap.addView(col, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (hold != null && active) {                            // 选中行右侧露个 ⋯，点了就是长按那套动作
+            TextView dots = Ui.tv(act, "⋯", 15f, Ui.ACCENT);
+            dots.setGravity(Gravity.CENTER);
+            dots.setPadding(Ui.dp(act, 10), 0, Ui.dp(act, 2), 0);
+            dots.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    hold.run();
+                }
+            });
+            wrap.addView(dots);
+        }
 
         if (tap != null) {
             wrap.setOnClickListener(new View.OnClickListener() {
