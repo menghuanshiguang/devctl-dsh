@@ -69,7 +69,7 @@ public class SettingsActivity extends Activity {
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
         LinearLayout body = Ui.col(this);
-        int ph = Ui.dp(this, 8);
+        int ph = Ui.dp(this, 16);                    // 左右留白加宽（原来 8dp 太贴边）
         body.setPadding(ph, Ui.dp(this, 2), ph, Ui.dp(this, 28));
         sc.addView(body, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -213,15 +213,8 @@ public class SettingsActivity extends Activity {
         return card;
     }
 
-    /** 组内分隔线：左边从文字起始处缩进（图标那一段留白），跟参考图一致。 */
+    /** 组内不再画分隔线（按用户要求取消）；行与行靠上下内边距自己分开。 */
     private void divider(LinearLayout card) {
-        if (card.getChildCount() == 0) return;
-        View line = new View(this);
-        line.setBackgroundColor(Ui.STROKE2);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(this, 0.5f)));
-        lp.leftMargin = Ui.dp(this, 52);
-        card.addView(line, lp);
     }
 
     /** 顶部那行小字：远端版写「设备 · 192.168.x.x:7788」，本地版写「本地 harness · 127.0.0.1:7788」。 */
