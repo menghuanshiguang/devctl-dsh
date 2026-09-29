@@ -125,6 +125,7 @@ public class ChatView extends ScrollView {
         curRaw += chunk;
         if (copySrc != null) copySrc[0] = curRaw;
         cur.setText(md(curRaw + CURSOR));
+        markLinks(cur, curRaw);
         scroll(false);
     }
 
@@ -132,6 +133,7 @@ public class ChatView extends ScrollView {
         if (cur == null) return;
         final String raw = curRaw;
         cur.setText(md(raw));
+        markLinks(cur, raw);
         // 流式期间是逐字改同一个 TextView，塞不进真表格；收尾时按最终文本重建一次，
         // 让 markdown 表格升级成真 View 表格（否则会一直留着等宽文本表格 + 字面 **）
         if (hasTable(raw)) {
@@ -1012,7 +1014,8 @@ public class ChatView extends ScrollView {
         TextView t = Ui.tv(ctx, s == null ? "" : s, Ui.FS_BODY, color);
         t.setText(md(s));
         t.setLineSpacing(0, 1.25f);                    // Minis 正文 16sp / 行高≈19-20sp（1.25 倍）
-        t.setTextIsSelectable(true);                   // 长按选词，出系统「复制/全选」菜单
+        t.setTextIsSelectable(true);
+        markLinks(t, s);                               // 有链接才上 MovementMethod（会顶掉长按选词）
         return t;
     }
 
@@ -1079,6 +1082,7 @@ public class ChatView extends ScrollView {
     private static boolean hasMd(String s) {
         return s.indexOf('*') >= 0 || s.indexOf('`') >= 0 || s.indexOf('~') >= 0
                 || s.indexOf('#') >= 0 || s.indexOf("> ") >= 0
+                || s.indexOf("http") >= 0 || s.indexOf("](") >= 0
                 || s.startsWith("|") || s.indexOf("\n|") >= 0;
     }
 
@@ -1089,6 +1093,8 @@ public class ChatView extends ScrollView {
             int b = s.indexOf("**", i);
             int c = s.indexOf('`', i);
             int k = s.indexOf("~~", i);
+            int l = linkAt(s, i);
+            int u = urlAt(s, i);
             int best = -1;
             if (b >= 0) {
                 best = b;
@@ -1099,9 +1105,40 @@ public class ChatView extends ScrollView {
             if (k >= 0 && (best < 0 || k < best)) {
                 best = k;
             }
+            if (l >= 0 && (best < 0 || l < best)) {
+                best = l;
+            }
+            if (u >= 0 && (best < 0 || u < best)) {
+                best = u;
+            }
             if (best < 0) {
                 out.append(s.substring(i));
                 return;
+            }
+            if (best == l) {                                  // [文字](链接)
+                int mid = s.indexOf("](", l);
+                int end = s.indexOf(')', mid + 2);
+                out.append(s.substring(i, l));
+                int ls = out.length();
+                out.append(s.substring(l + 1, mid));
+                link(out, ls, out.length(), s.substring(mid + 2, end));
+                i = end + 1;
+                continue;
+            }
+            if (best == u) {                                  // 裸链接
+                int e = u;
+                while (e < s.length() && !isUrlStop(s.charAt(e))) {
+                    e++;
+                }
+                while (e > u && ".,;:!?)]}\u3002\uff0c\uff1b\uff1a\uff01\uff1f\uff09\"'".indexOf(s.charAt(e - 1)) >= 0) {
+                    e--;
+                }
+                out.append(s.substring(i, u));
+                int us = out.length();
+                out.append(s.substring(u, e));
+                link(out, us, out.length(), s.substring(u, e));
+                i = e;
+                continue;
             }
             String mark = s.startsWith("**", best) ? "**" : (s.startsWith("~~", best) ? "~~" : "`");
             int e = s.indexOf(mark, best + mark.length());
@@ -1121,6 +1158,90 @@ public class ChatView extends ScrollView {
                 out.setSpan(new android.text.style.ForegroundColorSpan(Ui.AMBER), st, out.length(), 0);
             }
             i = e + mark.length();
+        }
+    }
+
+    /** 正文里有没有可点的链接（没链接就保持原来的长按选词）。 */
+    static boolean hasLink(String s) {
+        return s != null && (s.indexOf("http://") >= 0 || s.indexOf("https://") >= 0
+                || s.indexOf("](") >= 0);
+    }
+
+    /** 找 [文字](url) 的起点；没有返回 -1。 */
+    private static int linkAt(String s, int from) {
+        int p = s.indexOf('[', from);
+        while (p >= 0) {
+            int mid = s.indexOf("](", p);
+            if (mid > 0 && s.indexOf(')', mid + 2) > 0) {
+                return p;
+            }
+            p = s.indexOf('[', p + 1);
+        }
+        return -1;
+    }
+
+    /** 找裸链接（http:// / https://）的起点；前面紧挨着字母数字的（如 xhttp://）不算。 */
+    private static int urlAt(String s, int from) {
+        int p = s.indexOf("http", from);
+        while (p >= 0) {
+            boolean ok = s.startsWith("http://", p) || s.startsWith("https://", p);
+            if (ok && p > 0) {
+                char pv = s.charAt(p - 1);
+                ok = !(Character.isLetterOrDigit(pv) || pv == '_' || pv == '.' || pv == '/');
+            }
+            if (ok) {
+                return p;
+            }
+            p = s.indexOf("http", p + 4);
+        }
+        return -1;
+    }
+
+    private static boolean isUrlStop(char ch) {
+        return ch == ' ' || ch == '\t' || ch == '<' || ch == '>' || ch == '"' || ch == '\u3000';
+    }
+
+    /** 给 [st,en) 打上可点链接。 */
+    private void link(android.text.SpannableStringBuilder out, int st, int en, final String url) {
+        if (en <= st || url.length() == 0) {
+            return;
+        }
+        out.setSpan(new android.text.style.ClickableSpan() {
+            @Override
+            public void onClick(View v) {
+                openLink(url);
+            }
+            @Override
+            public void updateDrawState(android.text.TextPaint ds) {
+                ds.setColor(Ui.ACCENT);
+                ds.setUnderlineText(false);
+            }
+        }, st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    /** 点链接：交系统浏览器；实在没有就退化成复制到剪贴板。 */
+    private void openLink(String url) {
+        try {
+            android.content.Intent it = new android.content.Intent(
+                    android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+            it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(it);
+        } catch (Exception e) {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                        ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("link", url));
+                note("链接已复制（没找到能打开的浏览器）", Ui.AMBER, true);
+            } catch (Exception e2) {
+            }
+        }
+    }
+
+    /** 有链接的正文才上 LinkMovementMethod（它会顶掉长按选词，所以按需上）。 */
+    private void markLinks(TextView tv, String s) {
+        if (hasLink(s) && tv.getMovementMethod() == null) {
+            tv.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+            tv.setHighlightColor(0);
         }
     }
 
