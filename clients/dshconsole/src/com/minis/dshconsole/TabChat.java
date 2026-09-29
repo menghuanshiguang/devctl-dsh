@@ -138,7 +138,7 @@ public class TabChat extends Tab {
 
         LinearLayout card = new LinearLayout(act);   // DeepSeek 式：整块独立圆角卡片
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.bg(Ui.SURF2, 22, act));
+        card.setBackground(Ui.surf(Ui.CARD, 22, act));   // 卡面 + 一圈细灰边
         int cp = Ui.dp(act, 6);
         card.setPadding(cp, cp, cp, cp);
         card.addView(bar, new LinearLayout.LayoutParams(
@@ -189,12 +189,16 @@ public class TabChat extends Tab {
 
     /** 胶囊：图标 + 中文短名；active 时用强调色底，一眼看出这个设置被改过。 */
     private View chip(String label, boolean active, final Runnable tap) {
-        TextView t = Ui.tv(act, label, 12.5f, active ? Ui.ACCENT : Ui.DIM);
+        TextView t = Ui.tv(act, label, 12.5f, Ui.ACCENT);          // 胶囊统一蓝字
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        t.setMaxWidth(Ui.dp(act, 132));
+        t.setMaxWidth(Ui.dp(act, 140));
         t.setPadding(Ui.dp(act, 11), Ui.dp(act, 5), Ui.dp(act, 11), Ui.dp(act, 5));
-        t.setBackground(Ui.bg(active ? 0x2E0A84FF : Ui.SURF3, 15, act));   // 胶囊自己的底恢复
+        android.graphics.drawable.GradientDrawable cg = new android.graphics.drawable.GradientDrawable();
+        cg.setColor(active ? (Ui.DARK ? 0x3D0A84FF : 0xFFDCE9FF) : Ui.CHIP_BG);   // 淡蓝胶囊
+        cg.setCornerRadius(Ui.dp(act, 15));
+        cg.setStroke(Ui.dp(act, 1), active ? (Ui.DARK ? 0x800A84FF : 0xFFA8C8F5) : Ui.CHIP_BD);
+        t.setBackground(cg);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = Ui.dp(act, 6);
