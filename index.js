@@ -452,7 +452,18 @@ async function dispatch(bridge, connection, method, params) {
 
     case 'sessions.list': {
       const value = await controller.list({}, timeoutSignal(CALL_TIMEOUT_MS))
-      return { items: (value?.items ?? []).map(publicSummary) }
+      const items = value?.items ?? []
+      if (params.includeArchived === true) {
+        return { items: items.map(publicSummary), archivedHidden: 0 }
+      }
+      // 归档集合由 workspaceRegistry 维护（archiveSession 只是往集合里加 id），
+      // 官方客户端也是拿它把列表过滤掉的 —— 插件不滤的话，手机上"删除"了看着还在。
+      const archived = archivedSessionIds(bridge)
+      const kept = archived === null ? items : items.filter((one) => {
+        const id = typeof one?.sessionId === 'string' ? one.sessionId : one?.id
+        return typeof id !== 'string' || !archived.has(id)
+      })
+      return { items: kept.map(publicSummary), archivedHidden: items.length - kept.length }
     }
 
     // 单个会话的实时状态：客户端拿它决定「可发送 / 停止发送」，不要自己猜回合跑没跑完。
@@ -1492,6 +1503,17 @@ function describeEvent(event) {
       // 按会话事件族挑几件可显示的小字段带上（不含大正文，正文类事件另行截断）。
       return { kind: 'event', seq, type: event?.type, ...eventInfo(event?.type, data) }
     }
+  }
+}
+
+/** 归档集合：拿不到服务就返回 null（表示"过滤不了"，别假装滤过）。 */
+function archivedSessionIds(bridge) {
+  try {
+    const registry = requireService(bridge, 'workspaceRegistry')
+    const ids = registry?.archivedSessionIds
+    return ids === undefined ? new Set() : new Set([...ids])
+  } catch {
+    return null
   }
 }
 
