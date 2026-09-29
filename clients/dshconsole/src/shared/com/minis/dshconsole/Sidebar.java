@@ -23,6 +23,10 @@ public class Sidebar {
     private final LinearLayout root;
     private final LinearLayout wsBox;
     private final LinearLayout sessBox;
+    /** 正在做展开动画的工作区 id（渲染完顺手把这个块撑开）。 */
+    private String animWsId = null;
+    /** 每个工作区的正文容器：收起动画要先作用在它身上，再重建列表。 */
+    private final java.util.HashMap<String, View> wsBodies = new java.util.HashMap<String, View>();
     private final TextView info;
 
     public Sidebar(MainActivity a) {
@@ -262,6 +266,7 @@ public class Sidebar {
     private void renderWorkspaces(JSONArray items) {
         allWs = items;
         wsBox.removeAllViews();
+        wsBodies.clear();
         if (items == null || items.length() == 0) {
             wsBox.addView(row("(无工作区)", "", false, null, null, Ui.DIM));
             return;
@@ -288,9 +293,24 @@ public class Sidebar {
             // 点父节点 = 就地展开/收起二次列表（不关抽屉，不然看不到子项）；长按重命名
             grp.addView(row((open ? "▾ " : "▸ ") + title, sub, false, new Runnable() {
                 public void run() {
-                    if (openWs.contains(id)) openWs.remove(id);
-                    else openWs.add(id);
                     act.store.setLastWorkspace(act.dshName, id);   // ＋ 新建会话默认落在这里
+                    if (openWs.contains(id)) {
+                        // 收起：先把现在这块动画压到 0，再重建列表（重建完就没法动了）
+                        View body = wsBodies.get(id);
+                        if (body != null) {
+                            animateHeight(body, 1f, 0f, new Runnable() {
+                                public void run() {
+                                    openWs.remove(id);
+                                    renderWorkspaces(allWs);
+                                }
+                            });
+                            return;
+                        }
+                        openWs.remove(id);
+                    } else {
+                        openWs.add(id);
+                        animWsId = id;                             // 展开：重建完再把这个块撑开
+                    }
                     renderWorkspaces(allWs);
                 }
             }, new Runnable() {
@@ -299,8 +319,13 @@ public class Sidebar {
                 }
             }, Ui.TEXT));
             if (!open) continue;
+            LinearLayout body = Ui.col(act);                     // 子行统一放这里，方便整块做高度动画
+            body.setClipToPadding(false);
+            body.setClipChildren(false);
+            wsBodies.put(id, body);
+            grp.addView(body);
             if (kids.length() == 0) {
-                grp.addView(subRow("(该工作区还没有会话)", "", false, null, null));
+                body.addView(subRow("(该工作区还没有会话)", "", false, null, null));
             } else {
                 for (int j = 0; j < kids.length(); j++) {
                     final JSONObject s = kids.optJSONObject(j);
@@ -308,7 +333,7 @@ public class Sidebar {
                     final String sid = s.optString("sessionId", "");
                     final String st = s.optString("title", "");
                     final String t2 = st.length() > 0 ? st : "(未命名)";
-                    grp.addView(subRow(t2, TabSessions.age(s.optLong("updatedAt", 0)),
+                    body.addView(subRow(t2, TabSessions.age(s.optLong("updatedAt", 0)),
                             sid.equals(act.chatTab().currentSessionId()), new Runnable() {
                                 public void run() {
                                     act.openChat(sid, t2);      // openChat 里会顺手回收抽屉
@@ -320,11 +345,26 @@ public class Sidebar {
                             }));
                 }
             }
-            grp.addView(subRow("＋ 在此工作区新建会话", "", false, new Runnable() {
+            body.addView(subRow("＋ 在此工作区新建会话", "", false, new Runnable() {
                 public void run() {
                     newSessionIn(id);
                 }
             }, null));
+            if (id.equals(animWsId)) {                           // 刚展开的那个：0 → 实际高度
+                animWsId = null;
+                body.post(new Runnable() {
+                    public void run() {
+                        body.getLayoutParams().height = 0;
+                        body.setAlpha(0f);
+                        body.requestLayout();
+                        body.post(new Runnable() {
+                            public void run() {
+                                animateHeight(body, 0f, 1f, null);
+                            }
+                        });
+                    }
+                });
+            }
         }
     }
 
@@ -687,6 +727,48 @@ public class Sidebar {
     }
 
     // ---------------- 小控件 ----------------
+
+    /**
+     * 高度 0 ↔ 实际 的动画：0→1 时先量出自然高度再撑开，1→0 时把当前高度压到 0。
+     * 完事把 height 还原成 WRAP_CONTENT，之后内容变了也不会被定死。
+     */
+    private void animateHeight(final View v, final float from, final float to, final Runnable done) {
+        int start = from == 0f ? 0 : v.getHeight();
+        if (start <= 0 && to > 0) {
+            start = 0;
+            v.measure(android.view.View.MeasureSpec.makeMeasureSpec(
+                            ((View) v.getParent()).getWidth(), android.view.View.MeasureSpec.AT_MOST),
+                    android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED));
+            start = v.getMeasuredHeight();
+            // 撑开动画从 0 开始，所以先把自然高度记下来
+            v.getLayoutParams().height = 0;
+            v.requestLayout();
+        }
+        final int natural = to > 0 ? Math.max(start, 1) : start;
+        android.animation.ValueAnimator a = android.animation.ValueAnimator.ofInt(
+                to > 0 ? 0 : start, to > 0 ? start : 0);
+        a.setDuration(180);
+        a.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        a.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator an) {
+                int h = (Integer) an.getAnimatedValue();
+                android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+                lp.height = h;
+                v.setLayoutParams(lp);
+                v.setAlpha(to > 0 ? Math.min(1f, h / (float) natural) : Math.max(0f, h / (float) natural));
+            }
+        });
+        a.addListener(new android.animation.AnimatorListenerAdapter() {
+            public void onAnimationEnd(android.animation.Animator an) {
+                android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+                lp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                v.setLayoutParams(lp);
+                v.setAlpha(1f);
+                if (done != null) done.run();
+            }
+        });
+        a.start();
+    }
 
     private View section(String label, String action, final Runnable r) {
         LinearLayout row = Ui.row(act);
