@@ -89,9 +89,9 @@ public class TabChat extends Tab {
                 android.view.Gravity.TOP));
         // 底部渐隐（照 DeepSeek）：消息滑到输入卡上方时化进背景，不是硬切、也不留白带
         View fadeBot = new View(act);
-        fadeBot.setBackground(new Ui.FadeBg(Ui.dp(act, 30), Ui.BG & 0x00FFFFFF, Ui.BG));
+        fadeBot.setBackground(new Ui.FadeBg(Ui.dp(act, 20), Ui.BG & 0x00FFFFFF, Ui.BG));
         cvWrap.addView(fadeBot, new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 30),
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 20),
                 android.view.Gravity.BOTTOM));
         android.widget.FrameLayout.LayoutParams jlp = new android.widget.FrameLayout.LayoutParams(
                 Ui.dp(act, 40), Ui.dp(act, 40),
