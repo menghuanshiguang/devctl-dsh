@@ -27,6 +27,9 @@ const QR_PATH = '/devctl-dsh/qr.svg'
 /** A disconnected peer keeps its row in the settings list for this long. */
 const PEER_LINGER_MS = 5 * 60_000
 /** Prompt image parts accept exactly these media types. */
+/** 审批/提问等待手机端回话的上限：超时就交回给别的应答者（fail closed 由上层负责）。 */
+const APPROVAL_TIMEOUT_MS = 180_000
+const QUESTION_TIMEOUT_MS = 300_000
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 /** Where the control token is persisted, relative to `$DSH_HOME`. */
 const STATE_NAME = 'devctl-dsh.json'
@@ -100,6 +103,48 @@ export function apply(ctx, config) {
   const token = resolveToken(settings, stateFile, legacyStateFile)
   // 本地模式（harness 就跑在这台手机上）：回环连接免令牌。默认关，patch 里显式打开。
   const allowLocalNoAuth = settings.allowLocalNoAuth === true
+  /** 等手机端拍板的请求：id → { resolve, timer }。 */
+  const pending = new Map()
+
+  /** 把"要不要允许/怎么答"的请求发给在线手机端，等它回话；没人应就返回 null 交给别的应答者。 */
+  const askPeers = (evt, payload, timeoutMs) => {
+    const live = [...connections].filter((c) => c.authenticated && !c.socket.destroyed)
+    if (live.length === 0) return Promise.resolve(null)
+    const id = randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pending.delete(id)
+        resolve(null)
+      }, timeoutMs)
+      pending.set(id, { resolve, timer })
+      for (const c of live) c.send({ evt, data: { id, ...payload } })
+    })
+  }
+
+  // ---- 审批 / 提问：harness 这两件事是 waterfall 事件，插件注册应答者就能转发给手机端 ----
+  try {
+    ctx.on('approval/request', async (req, next) => {
+      const answer = await askPeers('approval', {
+        toolName: req?.tool?.name ?? req?.toolName ?? '',
+        reason: typeof req?.reason === 'string' ? req.reason : '',
+        callId: req?.call?.id ?? '',
+      }, APPROVAL_TIMEOUT_MS)
+      if (answer === 'allow') return 'allowed-once'
+      if (answer === 'deny') return 'denied'
+      return next()
+    })
+  } catch (error) {
+    log(`approval/request 应答者没挂上：${errorText(error)}`)
+  }
+  try {
+    ctx.on('user-questions/request', async (req, next) => {
+      const answer = await askPeers('question', { questions: publicQuestions(req) }, QUESTION_TIMEOUT_MS)
+      if (answer !== null && Array.isArray(answer.answers)) return answer
+      return next()
+    })
+  } catch (error) {
+    log(`user-questions/request 应答者没挂上：${errorText(error)}`)
+  }
 
   const connections = new Set()
   /**
@@ -491,6 +536,29 @@ async function dispatch(bridge, connection, method, params) {
       const rawPath = typeof params.path === 'string' ? params.path : ''
       if (rawPath.length === 0) throw new BridgeError('bad-request', 'path is required')
       return readWorkspaceImage(bridge, params.sessionId, rawPath)
+    }
+
+    /** 手机端点了「允许 / 拒绝」。 */
+    case 'approvals.decide': {
+      const id = typeof params.id === 'string' ? params.id : ''
+      const decision = params.decision === 'allow' ? 'allow' : 'deny'
+      const waiter = pending.get(id)
+      if (waiter === undefined) throw new BridgeError('not-found', '没有这个待审批请求（可能已超时）')
+      pending.delete(id)
+      clearTimeout(waiter.timer)
+      waiter.resolve(decision)
+      return { ok: true, id, decision }
+    }
+
+    /** 手机端答了 agent 的提问。 */
+    case 'questions.answer': {
+      const id = typeof params.id === 'string' ? params.id : ''
+      const waiter = pending.get(id)
+      if (waiter === undefined) throw new BridgeError('not-found', '没有这个待回答的提问（可能已超时）')
+      pending.delete(id)
+      clearTimeout(waiter.timer)
+      waiter.resolve({ answers: Array.isArray(params.answers) ? params.answers : [] })
+      return { ok: true, id }
     }
 
     /** 信箱快照：手机重新进会话时先要一份当前排队内容，之后靠 inbox 事件增量维护。 */
@@ -1342,6 +1410,7 @@ function describeEvent(event) {
         rpcId: typeof data.source?.rpcId === 'string' ? data.source.rpcId : undefined,
         text: textOf(data.content),
         images: imagesOf(data.content),
+        steering: data.source?.kind === 'steering',
       }
     case 'assistant/message':
       return {
@@ -1397,6 +1466,21 @@ function describeEvent(event) {
       return { kind: 'event', seq, type: event?.type, ...eventInfo(event?.type, data) }
     }
   }
+}
+
+/** 提问请求 → 手机端的卡片：题面 + 选项（标签/说明），都截断。 */
+function publicQuestions(req) {
+  const list = Array.isArray(req?.questions) ? req.questions : []
+  return list.map((q) => ({
+    id: typeof q?.id === 'string' ? q.id : '',
+    header: truncate(String(q?.header ?? q?.title ?? ''), 80),
+    question: truncate(String(q?.question ?? ''), 600),
+    multiSelect: q?.multiSelect === true,
+    options: (Array.isArray(q?.options) ? q.options : []).map((o) => ({
+      label: truncate(String(o?.label ?? ''), 120),
+      description: truncate(String(o?.description ?? ''), 240),
+    })),
+  }))
 }
 
 /** 事件族 → 手机端要的少量可显示字段。只挑小字段，绝不整包转发。 */

@@ -27,7 +27,7 @@ public class Ui {
     public static int TEXT, DIM, MUT;
     public static int ACCENT, MINE, THEIRS, GREEN, RED, AMBER, VIOLET;
     public static int CODE_BG, CODE_FG, ICODE_BG, ICODE_FG;
-    public static int TINT_TOOL, TINT_ERR, TINT_INJ;
+    public static int TINT_TOOL, TINT_ERR, TINT_INJ, TINT_WARN, TINT_INFO;
     public static int PANEL, PANEL2;                 // 兼容旧名
     public static int CARD, CHIP_BG, CHIP_BD;        // 输入卡片底 / 胶囊底 / 胶囊描边
 
@@ -99,6 +99,7 @@ public class Ui {
             CODE_BG = 0xFF262626; CODE_FG = 0xFF8CF38C;
             ICODE_BG = 0xFF34343A; ICODE_FG = 0xFFFF9F0A;
             TINT_TOOL = 0xFF26262A; TINT_ERR = 0xFF2A1A1C; TINT_INJ = 0xFF1E1A2A;
+            TINT_WARN = 0xFF2A2318; TINT_INFO = 0xFF16222E;
         } else {
             BG = 0xFFFFFFFF; SURF = 0xFFF2F2F7; SURF2 = 0xFFF2F2F7; SURF3 = 0xFFE5E5EA;
             STROKE = 0xFFD8D8DC; STROKE2 = 0x1F000000; PRESS = 0x14000000;
@@ -108,6 +109,7 @@ public class Ui {
             CODE_BG = 0xFFF6F6F8; CODE_FG = 0xFF1B5E20;
             ICODE_BG = 0xFFEDEDF2; ICODE_FG = 0xFF9A4B00;
             TINT_TOOL = 0xFFF2F2F7; TINT_ERR = 0xFFFFEDEE; TINT_INJ = 0xFFF4EEFF;
+            TINT_WARN = 0xFFFFF6E5; TINT_INFO = 0xFFEAF3FF;
         }
         THEIRS = 0x00000000;                         // 对方无气泡，直接铺底
         // 输入卡片 / 胶囊：亮色下白底卡靠细边立住，胶囊是淡蓝底蓝字（DeepSeek 那种）

@@ -45,9 +45,23 @@ public class ChatView extends ScrollView {
 
     /** 我发出去的话：右对齐气泡，宽度封顶 84%。 */
     public void user(String text) {
+        user(text, false);
+    }
+
+    /** 用户气泡；steering（插话）时加一个小标记，跟普通消息区分开。 */
+    public void user(String text, boolean steering) {
         dropEmpty();
         hasContent = true;
         spacer(Ui.S3);
+        if (steering) {
+            LinearLayout tagRow = new LinearLayout(ctx);
+            tagRow.setOrientation(LinearLayout.HORIZONTAL);
+            tagRow.setGravity(Gravity.END);
+            TextView tag = Ui.tv(ctx, "\u23CE 插话", Ui.FS_TINY, Ui.AMBER);
+            tag.setPadding(0, 0, Ui.dp(ctx, 4), 0);
+            tagRow.addView(tag);
+            col.addView(tagRow, fullLp());
+        }
         LinearLayout b = new LinearLayout(ctx);
         b.setOrientation(LinearLayout.VERTICAL);
         b.setBackground(Ui.bubble(Ui.MINE, ctx, true));
@@ -580,6 +594,193 @@ public class ChatView extends ScrollView {
     }
 
     /** 回合边界用发丝分隔线；彩色提示走居中细字。 */
+    // ==================== 需要人拍板的卡片（审批 / 提问）和回合页脚 ====================
+
+    /** 审批卡：harness 里"要不要允许这个动作"是 waterfall 请求，插件转发过来，这里出两个按钮。 */
+    public void approval(final String id, String tool, String reason) {
+        dropEmpty();
+        hasContent = true;
+        spacer(Ui.S1);
+        LinearLayout card = Ui.col(ctx);
+        card.setBackground(Ui.bg(Ui.TINT_WARN, 10, ctx, Ui.AMBER, 1));
+        card.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
+        LinearLayout head = new LinearLayout(ctx);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView mark = Ui.tv(ctx, "\u26A0", Ui.FS_SMALL, Ui.AMBER);
+        mark.setTypeface(Typeface.MONOSPACE);
+        mark.setPadding(0, 0, Ui.dp(ctx, 6), 0);
+        head.addView(mark);
+        head.addView(Ui.tv(ctx, "需要你确认", Ui.FS_SMALL, Ui.TEXT));
+        card.addView(head);
+        String t = tool == null ? "" : tool.trim();
+        String r = reason == null ? "" : reason.trim();
+        if (t.length() > 0) {
+            TextView body = Ui.tv(ctx, "工具 · " + t, Ui.FS_TINY, Ui.DIM);
+            body.setPadding(0, Ui.dp(ctx, 3), 0, 0);
+            card.addView(body);
+        }
+        if (r.length() > 0) {
+            TextView why = Ui.tv(ctx, clean(r, 300), Ui.FS_TINY, Ui.MUT);
+            why.setPadding(0, Ui.dp(ctx, 2), 0, 0);
+            card.addView(why);
+        }
+        LinearLayout btns = Ui.row(ctx);
+        btns.setGravity(Gravity.CENTER_VERTICAL);
+        btns.setPadding(0, Ui.dp(ctx, 6), 0, 0);
+        TextView allow = chip("允许一次", Ui.ACCENT);
+        allow.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (approvalCb != null) approvalCb.onDecide(id, true);
+                note("\u00B7 已允许", Ui.DIM);
+            }
+        });
+        TextView deny = chip("拒绝", Ui.RED);
+        deny.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (approvalCb != null) approvalCb.onDecide(id, false);
+                note("\u00B7 已拒绝", Ui.DIM);
+            }
+        });
+        btns.addView(allow);
+        btns.addView(deny);
+        card.addView(btns);
+        col.addView(card, fullLp());
+        scroll(true);
+    }
+
+    /** 审批卡上的按钮回调（App 侧负责发 approvals.decide）。 */
+    public interface ApprovalCb {
+        void onDecide(String id, boolean allow);
+    }
+
+    private ApprovalCb approvalCb;
+
+    public void setApprovalCb(ApprovalCb cb) {
+        approvalCb = cb;
+    }
+
+    /** 提问卡：agent 的 ask_user_question 也是 waterfall，插件转发过来；每个问题一组选项按钮。 */
+    public void question(String id, org.json.JSONArray questions) {
+        dropEmpty();
+        hasContent = true;
+        spacer(Ui.S1);
+        LinearLayout card = Ui.col(ctx);
+        card.setBackground(Ui.bg(Ui.TINT_INFO, 10, ctx, Ui.ACCENT, 1));
+        card.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
+        card.addView(Ui.tv(ctx, "\u2753 agent 需要你回答", Ui.FS_SMALL, Ui.TEXT));
+        for (int i = 0; questions != null && i < questions.length(); i++) {
+            org.json.JSONObject q = questions.optJSONObject(i);
+            if (q == null) continue;
+            final String qid = q.optString("id", "");
+            String header = q.optString("header", "");
+            String text = q.optString("question", "");
+            TextView qt = Ui.tv(ctx, (header.length() > 0 ? header + " \u00B7 " : "") + clean(text, 300),
+                    Ui.FS_TINY, Ui.DIM);
+            qt.setPadding(0, Ui.dp(ctx, 5), 0, Ui.dp(ctx, 2));
+            card.addView(qt);
+            LinearLayout opts = Ui.row(ctx);
+            opts.setGravity(Gravity.CENTER_VERTICAL);
+            org.json.JSONArray os = q.optJSONArray("options");
+            for (int k = 0; os != null && k < os.length(); k++) {
+                org.json.JSONObject o = os.optJSONObject(k);
+                if (o == null) continue;
+                final String label = o.optString("label", "");
+                if (label.length() == 0) continue;
+                TextView b = chip(clean(label, 40), Ui.ACCENT);
+                b.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        if (questionCb != null) questionCb.onAnswer(id, qid, label);
+                        note("\u00B7 已答：" + label, Ui.DIM);
+                    }
+                });
+                opts.addView(b);
+            }
+            card.addView(opts);
+        }
+        col.addView(card, fullLp());
+        scroll(true);
+    }
+
+    /** 提问卡的回调（App 侧发 questions.answer）。 */
+    public interface QuestionCb {
+        void onAnswer(String requestId, String questionId, String option);
+    }
+
+    private QuestionCb questionCb;
+
+    public void setQuestionCb(QuestionCb cb) {
+        questionCb = cb;
+    }
+
+    /** 交付物卡：harness 的 deliverables/presented。 */
+    public void deliverables(String title, org.json.JSONArray items) {
+        dropEmpty();
+        hasContent = true;
+        spacer(Ui.S1);
+        LinearLayout card = Ui.col(ctx);
+        card.setBackground(Ui.bg(Ui.SURF2, 10, ctx));
+        card.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
+        card.addView(Ui.tv(ctx, "\uD83D\uDCE6 " + (title == null || title.length() == 0 ? "交付物" : title),
+                Ui.FS_SMALL, Ui.TEXT));
+        for (int i = 0; items != null && i < items.length(); i++) {
+            org.json.JSONObject it = items.optJSONObject(i);
+            if (it == null) continue;
+            String name = it.optString("name", it.optString("path", ""));
+            String size = it.optString("sizeText", "");
+            TextView row = Ui.tv(ctx, "\u00B7 " + clean(name, 80) + (size.length() > 0 ? "  " + size : ""),
+                    Ui.FS_TINY, Ui.DIM);
+            row.setPadding(0, Ui.dp(ctx, 2), 0, 0);
+            card.addView(row);
+        }
+        col.addView(card, fullLp());
+        scroll(true);
+    }
+
+    /** 回合页脚：耗时/用量 + 「本轮过程」一键收起。 */
+    public void turnFooter(String text, final java.util.List<View> traces, final int rows) {
+        LinearLayout card = Ui.col(ctx);
+        LinearLayout row = Ui.row(ctx);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 2));
+        row.addView(Ui.tv(ctx, text == null ? "" : text, Ui.FS_TINY, Ui.MUT),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (traces != null && traces.size() > 0 && rows > 0) {
+            final boolean[] open = {true};
+            final TextView t = Ui.tv(ctx, "收起过程", Ui.FS_TINY, Ui.ACCENT);
+            t.setPadding(Ui.dp(ctx, 8), 0, 0, 0);
+            t.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    open[0] = !open[0];
+                    for (int i = 0; i < traces.size(); i++) {
+                        View tr = traces.get(i);
+                        tr.setVisibility(open[0] ? View.VISIBLE : View.GONE);
+                    }
+                    t.setText(open[0] ? "收起过程" : "过程 \u00D7" + rows);
+                }
+            });
+            row.addView(t);
+        }
+        card.addView(row);
+        col.addView(card, fullLp());
+        snapToBottom();
+    }
+
+    /** 小胶囊按钮（审批 / 提问用）。 */
+    private TextView chip(String label, int color) {
+        TextView t = Ui.tv(ctx, label, 12.5f, color);
+        t.setGravity(Gravity.CENTER);
+        int p = Ui.dp(ctx, 10);
+        t.setPadding(p, Ui.dp(ctx, 5), p, Ui.dp(ctx, 5));
+        t.setBackground(Ui.bg(Ui.SURF2, 12, ctx, Ui.STROKE, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = Ui.dp(ctx, 6);
+        t.setLayoutParams(lp);
+        Ui.press(t, ctx, Ui.SURF3, 12);
+        return t;
+    }
+
     public void note(String text, int color) {
         note(text, color, true);
     }
@@ -2002,6 +2203,18 @@ public class ChatView extends ScrollView {
     }
 
     /** \u771f\u5f00\u4e00\u6761\u8f68\u8ff9\uff1a\u6709\u9762\u677f\u5c31\u6302\u8fdb\u9762\u677f\uff08\u66ff\u6362\u4e0a\u4e00\u6761\uff09\uff0c\u6ca1\u6709\u5c31\u843d\u5728\u6d88\u606f\u6d41\u91cc\u3002 */
+    /** 本轮创建过的过程组：回合页脚用它做「收起过程」。 */
+    private final java.util.List<View> turnTraces = new java.util.ArrayList<View>();
+
+    /** 新回合开始：清掉上一轮的登记。 */
+    public void beginTurn() {
+        turnTraces.clear();
+    }
+
+    public java.util.List<View> turnTraces() {
+        return turnTraces;
+    }
+
     private void openTrace() {
         if (traceHeadHost != null) {
             trace = new Trace();
@@ -2023,6 +2236,7 @@ public class ChatView extends ScrollView {
         spacer(Ui.S2);
         trace = new Trace();
         col.addView(trace.box, fullLp());
+        if (!turnTraces.contains(trace.box)) turnTraces.add(trace.box);
         traceAnchor = col.getChildCount() - 1;
     }
 

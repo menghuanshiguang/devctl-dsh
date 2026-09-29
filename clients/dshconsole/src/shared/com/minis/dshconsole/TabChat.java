@@ -29,6 +29,7 @@ public class TabChat extends Tab {
     private final java.util.List<Queued> queue = new java.util.ArrayList<Queued>();
     private long lastInboxAt;
     /** 最后一条发出去的时刻 + 最后一个回包的时刻：用来量「局域网到底慢在哪」。 */
+    private long turnStartedAt;
     private volatile long sentAt;
     private volatile long lastEventAt;
     private boolean inboxRefreshing;
@@ -58,6 +59,70 @@ public class TabChat extends Tab {
     public TabChat(MainActivity a) {
         super(a);
         installImgLoader();
+        wireInteractiveCards();
+    }
+
+    /** 审批 / 提问卡上的按钮：点一下就发一条一次性 RPC 回 host。 */
+    private void wireInteractiveCards() {
+        cv.setApprovalCb(new ChatView.ApprovalCb() {
+            public void onDecide(final String id, final boolean allow) {
+                rpcQuiet("approvals.decide", id, allow ? "allow" : "deny");
+            }
+        });
+        cv.setQuestionCb(new ChatView.QuestionCb() {
+            public void onAnswer(final String reqId, final String qid, final String option) {
+                try {
+                    JSONObject p = new JSONObject();
+                    p.put("id", reqId);
+                    JSONArray ans = new JSONArray();
+                    JSONObject one = new JSONObject();
+                    one.put("id", qid);
+                    one.put("option", option);
+                    ans.put(one);
+                    p.put("answers", ans);
+                    rpc("questions.answer", p);
+                } catch (Exception e) {
+                    cv.note("回答案失败：" + e.getMessage(), Ui.RED);
+                }
+            }
+        });
+    }
+
+    /** 审批用的简版 RPC（一条短连接发完就走）。 */
+    private void rpcQuiet(final String method, final String id, final String decision) {
+        try {
+            JSONObject p = new JSONObject();
+            p.put("id", id);
+            p.put("decision", decision);
+            rpc(method, p);
+        } catch (Exception e) {
+            cv.note("回话失败：" + e.getMessage(), Ui.RED);
+        }
+    }
+
+    private void rpc(final String method, final JSONObject params) {
+        act.bg(new Runnable() {
+            public void run() {
+                Dsh c = null;
+                try {
+                    c = act.openDsh(8000);
+                    c.request(method, params, 20000, null);
+                } catch (final Exception e) {
+                    act.ui(new Runnable() {
+                        public void run() {
+                            cv.note(method + " 失败：" + e.getMessage(), Ui.RED);
+                        }
+                    });
+                } finally {
+                    if (c != null) {
+                        try {
+                            c.close();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /** 装图片加载器：只有聊天页知道该用哪条连接去问 host 要字节。 */
@@ -1201,6 +1266,27 @@ public class TabChat extends Tab {
             });
             return;
         }
+        if ("approval".equals(event)) {
+            final String id = data.optString("id", "");
+            final String tool = data.optString("toolName", data.optString("name", ""));
+            final String reason = data.optString("reason", data.optString("text", ""));
+            act.ui(new Runnable() {
+                public void run() {
+                    cv.approval(id, tool, reason);
+                }
+            });
+            return;
+        }
+        if ("question".equals(event)) {
+            final String id = data.optString("id", "");
+            final JSONArray qs = data.optJSONArray("questions");
+            act.ui(new Runnable() {
+                public void run() {
+                    cv.question(id, qs);
+                }
+            });
+            return;
+        }
         if ("delta".equals(event)) {
             final String chunk = data.optString("text", "");
             logFrame(data.optBoolean("reasoning", false) ? "reasoning" : "text", chunk);
@@ -1259,7 +1345,15 @@ public class TabChat extends Tab {
         }
         String kind = data.optString("kind", "");
         if ("turn-start".equals(kind)) {
+            act.ui(new Runnable() {
+                public void run() {
+                    cv.beginTurn();
+                }
+            });
+        }
+        if ("turn-start".equals(kind)) {
             turnStarted = true;
+            turnStartedAt = System.currentTimeMillis();
             return;
         }
         if ("turn-end".equals(kind)) {
@@ -1274,6 +1368,9 @@ public class TabChat extends Tab {
                     public void run() {
                         cv.thinkEnd();                    // 只思考、没正文也要把那一行留下
                         cv.botEnd();
+                        long secs = Math.max(1, (System.currentTimeMillis() - turnStartedAt + 999) / 1000);
+                        cv.turnFooter("\u5DF2\u5B8C\u6210 \u00B7 \u7528\u65F6 " + secs + " \u79D2",
+                                cv.turnTraces(), cv.turnTraces().size());
                         // 这轮怎么收的，得说清楚：额度用尽/上下文超限以前是「什么都没发生」
                         if ("error".equals(rk)) {
                             cv.fail(rmsg, rcode);
@@ -1402,7 +1499,8 @@ public class TabChat extends Tab {
             return;
         }
         if (ty.startsWith("deliverables/presented")) {
-            cv.note("\uD83D\uDCE6 交付物" + (extra.length() > 0 ? " · " + extra : ""), Ui.DIM);
+            JSONArray items = r.optJSONArray("items");
+            cv.deliverables(r.optString("name", ""), items);
             return;
         }
         if (noise(ty)) return;
@@ -1528,8 +1626,9 @@ public class TabChat extends Tab {
             if (!imgs.isEmpty()) logImg("user images n=" + imgs.size());
             // 协议层不区分「我自己发的」和「host 注入的运行期上下文」，两者都是 user 记录：
             // 发出去的原文见过 → 用户气泡；否则按注入上下文折叠展示。
+            boolean steer = r.optBoolean("steering", false);
             if (!isMine(txt) && looksInjected(txt)) cv.inject(DshConsole.clamp(txt, 60000));
-            else if (txt.length() > 0) cv.user(DshConsole.clamp(txt, 4000));
+            else if (txt.length() > 0) cv.user(DshConsole.clamp(txt, 4000), steer);
             if (!imgs.isEmpty()) cv.images(imgs, true);      // 历史里的图：先画占位，真要显示再去 host 取
         } else if ("inbox".equals(kind)) {
             applyQueueSplice(r.optJSONArray("inserted")); // 队列变了：重新跟 host 对一次账
@@ -1596,7 +1695,7 @@ public class TabChat extends Tab {
         input.setText("");
         clearAttachments();
         if (text.length() > 0) markMine(text);               // 记账：这条是我发的，历史里别当注入
-        if (text.length() > 0) cv.user(DshConsole.clamp(text, 4000));
+        if (text.length() > 0) cv.user(DshConsole.clamp(text, 4000), "steer".equals(modeArg));
         if (!imgs.isEmpty()) cv.images(imgs, true);          // 本机图片先本地亮出来，别等 host 回程
         final Queued row = new Queued();
         row.text = text;
