@@ -46,7 +46,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        Ui.applyTheme(this);          // 先刷调色板，后面所有控件才拿得到对的颜色
+        Ui.applyTheme(this);
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);          // 先刷调色板，后面所有控件才拿得到对的颜色
         // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         getWindow().setStatusBarColor(Ui.BG);      // 状态栏跟顶栏、消息区连成一片
