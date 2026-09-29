@@ -138,7 +138,8 @@ public class TabChat extends Tab {
 
         LinearLayout card = new LinearLayout(act);   // DeepSeek 式：整块独立圆角卡片
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.surf(Ui.CARD, 22, act));   // 卡面 + 一圈细灰边
+        card.setBackground(Ui.bg(Ui.CARD, 22, act));     // 不描边，靠一点点阴影浮起来
+        card.setElevation(Ui.dp(act, 6));
         int cp = Ui.dp(act, 6);
         card.setPadding(cp, cp, cp, cp);
         card.addView(bar, new LinearLayout.LayoutParams(
