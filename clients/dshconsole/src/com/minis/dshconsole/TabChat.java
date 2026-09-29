@@ -102,6 +102,31 @@ public class TabChat extends Tab {
                         ? android.view.View.GONE : android.view.View.VISIBLE);
             }
         });
+        // 思考面板：常驻在消息区上方，标题一直在、点一下折叠；正文最多 240dp，超出内部滚
+        LinearLayout thinkCard = Ui.col(act);
+        thinkCard.setBackground(Ui.bg(Ui.SURF, 16, act));
+        thinkCard.setPadding(Ui.dp(act, 12), Ui.dp(act, 4), Ui.dp(act, 12), Ui.dp(act, 6));
+        LinearLayout thinkHeadHost = Ui.col(act);
+        LinearLayout thinkBodyHost = Ui.col(act);
+        Ui.MaxScroll thinkScroll = new Ui.MaxScroll(act);
+        thinkScroll.maxH = Ui.dp(act, 240);
+        thinkScroll.addView(thinkBodyHost, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT));
+        thinkCard.addView(thinkHeadHost, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        thinkCard.addView(thinkScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        thinkCard.setVisibility(android.view.View.GONE);
+        LinearLayout.LayoutParams tclp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tclp.leftMargin = Ui.dp(act, 8);
+        tclp.rightMargin = Ui.dp(act, 8);
+        tclp.topMargin = Ui.dp(act, 4);
+        tclp.bottomMargin = Ui.dp(act, 2);
+        box.addView(thinkCard, 1, tclp);             // 插在状态行和消息区之间
+        cv.setTraceHost(thinkCard, thinkHeadHost, thinkBodyHost, thinkScroll);
+
         box.addView(cvWrap, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));   // 不用负 margin：会让输入卡被顶起来、下方留死空白
 
