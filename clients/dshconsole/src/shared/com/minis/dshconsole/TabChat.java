@@ -1903,7 +1903,10 @@ public class TabChat extends Tab {
         input.setText("");
         clearAttachments();
         if (text.length() > 0) markMine(text);               // 记账：这条是我发的，历史里别当注入
-        if (text.length() > 0) cv.user(DshConsole.clamp(text, 4000), "steer".equals(modeArg));
+        // 带上分叉切点：发之前"最新记录的 seq"就是这条消息之前那条 —— 新发的消息也能编辑重发
+        if (text.length() > 0) {
+            cv.user(DshConsole.clamp(text, 4000), "steer".equals(modeArg), lastRecordSeq);
+        }
         if (!imgs.isEmpty()) cv.images(imgs, true);          // 本机图片先本地亮出来，别等 host 回程
         final Queued row = new Queued();
         row.text = text;
