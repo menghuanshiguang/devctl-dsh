@@ -3,7 +3,10 @@
 import { readFileSync } from 'node:fs'
 
 const src = readFileSync(new URL('./index.js', import.meta.url), 'utf8')
-const lines = src.split('\n')
+// Windows 检出（core.autocrlf=true）会给每行留一个 \r，而 grab() 靠 lines[i] === '}' 判函数
+// 结尾 —— 那个 \r 让它永远匹配不上，于是抓到文件末尾，把 export 语句一起塞进 new Function()，
+// 直接 SyntaxError。先剥掉。
+const lines = src.split('\n').map((line) => line.replace(/\r$/u, ''))
 
 function grab(decl) {
   const start = lines.findIndex((line) => line.startsWith(decl) || line.startsWith(`async ${decl}`))

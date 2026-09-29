@@ -3,10 +3,13 @@
 import { readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 process.env.TMPDIR = '/tmp'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const src = readFileSync(new URL('./index.js', import.meta.url), 'utf8')
-const lines = src.split('\n')
+// Windows 检出（core.autocrlf=true）会给每行留一个 \r，而 grab() 靠 lines[i] === '}' 判函数
+// 结尾 —— 那个 \r 让它永远匹配不上，于是抓到文件末尾，把 export 语句一起塞进 new Function()，
+// 直接 SyntaxError。先剥掉。
+const lines = src.split('\n').map((line) => line.replace(/\r$/u, ''))
 
 function grab(decl) {
   const start = lines.findIndex((line) => line.startsWith(decl) || line.startsWith(`async ${decl}`))
@@ -53,7 +56,10 @@ const api = sandbox(
   path.extname, path.basename, path.sep,
 )
 
-const root = mkdtempSync(join('/tmp', 'dsh-file-'))
+// mkdtemp 在 Windows 上回的是根相对路径（\tmp\dsh-file-xxx，不带盘符），而
+// readWorkspaceImage 内部用 resolve() 拼相对路径时会补上盘符，两侧前缀就对不上、
+// 工作区内的文件也被判成越界。先把根绝对化，边界检查才是有效的比较。
+const root = resolve(mkdtempSync(join('/tmp', 'dsh-file-')))
 const work = join(root, 'work')
 const outside = join(root, 'outside')
 mkdirSync(work)

@@ -3,7 +3,9 @@
 import { readFileSync } from 'node:fs'
 
 const src = readFileSync(new URL('./index.js', import.meta.url), 'utf8')
-const lines = src.split('\n')
+// Windows 检出（core.autocrlf=true）会给每行留一个 \r，剥掉它，grab() 的 `=== '}'` 收尾
+// 判断才真的成立，而不是一路抓到文件末尾把 export 一起卷进 new Function()。
+const lines = src.split('\n').map((line) => line.replace(/\r$/u, ''))
 
 /** 从 index.js 里抠出函数/常量定义（都是单层缩进的纯函数，按行抓足够）。 */
 function grab(decl) {
