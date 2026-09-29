@@ -177,6 +177,52 @@ public class ChatView extends ScrollView {
     private TextView thinkBody;
     private String thinkRaw = "";
     private TextView thinkPrev;               // 流式期间只露最新一行
+    private long thinkHeadAt;                 // 标题文字节流：流式期间别每帧 setText，否则点击会被取消
+
+    private boolean following = true;         // 用户是否贴在底部；一旦翻上去就不再抢位置
+    private long ignoreScrollUntil;           // 程序化滚动后的短暂静默期，免得把自己的滚动误判成用户操作
+    private Runnable followCb;                // 跟随状态变化回调（给右下角下箭头用）
+
+    /** 由外部（TabChat）接管右下角下箭头的显示/隐藏。 */
+    public void setFollowCb(Runnable r) {
+        followCb = r;
+    }
+
+    public boolean isFollowing() {
+        return following;
+    }
+
+    private void setFollowing(boolean f) {
+        if (following == f) return;
+        following = f;
+        if (followCb != null) followCb.run();
+    }
+
+    private boolean atBottom() {
+        int gap = (col.getHeight() - getHeight()) - getScrollY();
+        return gap <= Ui.dp(ctx, 32);
+    }
+
+    /** 回到最新（点右下角下箭头走这里）。 */
+    public void jumpToBottom() {
+        setFollowing(true);
+        scroll(true);
+    }
+
+    /** 标题文字节流：250ms 内的重复更新直接吞掉。 */
+    private boolean headTick() {
+        long now = System.currentTimeMillis();
+        if (now - thinkHeadAt < 250) return false;
+        thinkHeadAt = now;
+        return true;
+    }
+
+    @Override
+    protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+        super.onScrollChanged(l, t, oldl, oldt);
+        if (System.currentTimeMillis() < ignoreScrollUntil) return;   // 自己滚的不算
+        setFollowing(atBottom());
+    }
 
     /** ✦ 思考 · N 字 ▾   phase=1 表示还在思考。 */
     private String thinkHeadText(int count, int phase, boolean open) {
@@ -220,7 +266,8 @@ public class ChatView extends ScrollView {
                 st[2] = 1;
                 head.setText(thinkHeadText(st[0], 0, !open));
                 if (prev.getVisibility() == View.VISIBLE) prev.setVisibility(open ? View.VISIBLE : View.GONE);
-                scroll(false);
+                if (!open) setFollowing(false);     // 展开后自己看，别让流式把屏幕拽回底部
+                else scroll(false);
             }
         });
         thinkBox.addView(head, fullLp());
@@ -245,11 +292,11 @@ public class ChatView extends ScrollView {
         return (cut ? "\u2026" : "") + s.substring(st, end).trim();
     }
 
-    /** 思考增量：默认折叠，只在标题下刷新最新一行。 */
+    /** 思考增量：默认折叠，只在标题下刷新最新一行；展开时只喂尾部一段，标题才够得着。 */
     public void thinkAppend(String chunk) {
         if (thinkBox == null) thinkStart();
         thinkRaw += chunk;
-        if (thinkBody != null) thinkBody.setText(thinkRaw);
+        if (thinkBody != null) thinkBody.setText(thinkShow());
         boolean open = thinkBody != null && thinkBody.getVisibility() == View.VISIBLE;
         if (thinkPrev != null) {
             thinkPrev.setText(thinkTailLine());
@@ -258,9 +305,16 @@ public class ChatView extends ScrollView {
         if (thinkHead != null && thinkHead.getTag() instanceof int[]) {
             int[] st = (int[]) thinkHead.getTag();
             st[0] = thinkRaw.length();
-            thinkHead.setText(thinkHeadText(st[0], 1, open));
+            if (headTick()) thinkHead.setText(thinkHeadText(st[0], 1, open));   // 节流，否则点击会被 setText 取消
         }
         scroll(false);
+    }
+
+    /** 展开时喂给正文的文本：流式期间只给尾部一段，标题不会被顶出屏幕。 */
+    private CharSequence thinkShow() {
+        final int cap = 1200;
+        if (thinkRaw.length() <= cap) return thinkRaw;
+        return "\u2026" + thinkRaw.substring(thinkRaw.length() - cap);
     }
 
     /** 思考结束：收起，只留一行「✦ 思考 · N 字 ▸」。 */
@@ -272,6 +326,7 @@ public class ChatView extends ScrollView {
             st[1] = 0;
             boolean open = thinkBody != null && thinkBody.getVisibility() == View.VISIBLE;
             thinkHead.setText(thinkHeadText(st[0], 0, open));
+            if (thinkBody != null) thinkBody.setText(thinkRaw);      // 结束后换全文，回看不受限
             if (thinkPrev != null) thinkPrev.setVisibility(View.GONE);
             if (thinkBody != null && st[2] == 0) thinkBody.setVisibility(View.GONE);
         }
@@ -854,6 +909,7 @@ public class ChatView extends ScrollView {
                 }
                 tv.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
                 tv.setMinWidth(0);
+                tv.setTextIsSelectable(true);          // 表格里的字也能长按选中复制
                 float wt = Math.max(3f, Math.min(18f, w[c]));   // 按内容宽定权重：均分会把「值」列挤到换行
                 line.addView(tv, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, wt));
             }
@@ -936,6 +992,7 @@ public class ChatView extends ScrollView {
         TextView t = Ui.tv(ctx, s == null ? "" : s, Ui.FS_BODY, color);
         t.setText(md(s));
         t.setLineSpacing(0, 1.25f);                    // Minis 正文 16sp / 行高≈19-20sp（1.25 倍）
+        t.setTextIsSelectable(true);                   // 长按选词，出系统「复制/全选」菜单
         return t;
     }
 
@@ -1108,6 +1165,9 @@ public class ChatView extends ScrollView {
     private void queueScroll(final boolean smooth) {
         if (smooth) {
             scrollSmooth = true;
+            setFollowing(true);                      // 强制滚动 = 回到最新，重新开始跟随
+        } else if (!following) {
+            return;                                  // 用户已经翻上去看别处了，绝不抢位置
         }
         if (scrollQueued) {
             return;
@@ -1119,6 +1179,7 @@ public class ChatView extends ScrollView {
                 scrollQueued = false;
                 scrollSmooth = false;
                 int y = Math.max(0, col.getHeight() - getHeight());
+                ignoreScrollUntil = System.currentTimeMillis() + 150;   // 自己滚的，别当成用户操作
                 if (sm) {
                     smoothScrollTo(0, y);
                 } else {
