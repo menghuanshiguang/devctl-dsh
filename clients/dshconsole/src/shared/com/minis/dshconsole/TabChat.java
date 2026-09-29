@@ -1884,13 +1884,10 @@ public class TabChat extends Tab {
         } else if ("turn-start".equals(kind)) {
             // 「▷ 回合 N」这类内部计数不再往对话里写（要排查看 logcat 就行）
         } else if ("turn-end".equals(kind)) {
-            String reason = r.optString("reason", "");
-            // 记录 seq：下面统一更新（末尾）
-            // 正常收尾（completed）不写这行 —— 过程组表头/页脚已经说明一切；
-            // 异常收尾另有更具体的提示（下面那些 fail/已打断/上限…），这里只兜底非 completed 的怪值
-            if (reason.length() > 0 && !"completed".equals(reason)) {
-                cv.note("— 回合结束 · " + reason, Ui.DIM);
-            }
+            // 「— 回合结束 …」整行都不再往对话里写：
+            // 过程组表头/页脚已经表达了收尾；真出问题另有失败卡、打断提示、上限提示。
+            // （以前是按 reason 判断，可 reason 在协议里是**对象**——optString 拿到的是一串
+            //  {"kind":"completed"}，跟 "completed" 比永远不等，所以怎么都藏不掉。）
             cv.snapToBottom();                     // 收尾再钉一次真正的底部
         }
         if (seq >= 0) lastRecordSeq = seq;         // 给下一条用户消息算分叉点
