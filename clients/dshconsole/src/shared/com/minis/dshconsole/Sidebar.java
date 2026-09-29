@@ -672,7 +672,7 @@ public class Sidebar {
         final String id = s.optString("sessionId");
         final String title = s.optString("title", "");
         new AlertDialog.Builder(act).setTitle(TabSessions.shortId(id))
-                .setItems(new String[]{"进入", "重命名", "打断当前回合", "复制 ID"},
+                .setItems(new String[]{"进入", "重命名", "打断当前回合", "删除对话", "复制 ID"},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) {
@@ -681,6 +681,8 @@ public class Sidebar {
                                     renameSession(id, title);
                                 } else if (w == 2) {
                                     act.chatTab().cancel();
+                                } else if (w == 3) {
+                                    archiveSession(id, title);
                                 } else {
                                     android.content.ClipboardManager cm =
                                             (android.content.ClipboardManager) act.getSystemService(
@@ -690,6 +692,57 @@ public class Sidebar {
                                 }
                             }
                         }).show();
+    }
+
+    /**
+     * 删除对话：DSH 自己的语义是**归档**（从列表里移走，可恢复），没有硬删的口子。
+     * 所以这里出确认框、把话说清楚，再调 sessions.archive；正在跑的话用 force 先停。
+     */
+    private void archiveSession(final String id, String title) {
+        new AlertDialog.Builder(act)
+                .setTitle("删除对话")
+                .setMessage("会把「" + (title == null || title.length() == 0 ? TabSessions.shortId(id) : title)
+                        + "」从列表里移走（DSH 的归档语义，可恢复）。\n正在跑的回合会被停掉。")
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        act.bg(new Runnable() {
+                            public void run() {
+                                Dsh c = null;
+                                try {
+                                    c = act.requireDsh();
+                                    JSONObject p = new JSONObject();
+                                    p.put("sessionId", id);
+                                    p.put("force", true);
+                                    c.request("sessions.archive", p, 30000, null);
+                                    final String cur = act.chatTab().currentSessionId();
+                                    act.ui(new Runnable() {
+                                        public void run() {
+                                            act.toast("已删除（归档）");
+                                            if (id.equals(cur)) act.chatTab().loadSession("", "");
+                                            loadSessions();
+                                            loadWorkspaces();
+                                        }
+                                    });
+                                } catch (final Exception e) {
+                                    act.ui(new Runnable() {
+                                        public void run() {
+                                            act.toast("删除失败：" + e.getMessage());
+                                        }
+                                    });
+                                } finally {
+                                    if (c != null) {
+                                        try {
+                                            c.close();
+                                        } catch (Throwable ignored) {
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void renameSession(final String id, String cur) {

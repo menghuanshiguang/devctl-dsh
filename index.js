@@ -580,6 +580,31 @@ async function dispatch(bridge, connection, method, params) {
       requireSessionId(params)
       return controller.cancel({ sessionId: params.sessionId })
 
+    /**
+     * 归档对话 = DSH 自己的"从列表里删掉"（可恢复）。
+     * harness 没有硬删除会话的口子，官方语义就是 workspaceRegistry.archiveSession。
+     */
+    case 'sessions.archive': {
+      requireSessionId(params)
+      const registry = requireService(bridge, 'workspaceRegistry')
+      if (typeof registry.archiveSession !== 'function') {
+        throw new BridgeError('unavailable', '这个 Host 的 workspaceRegistry 不支持 archiveSession')
+      }
+      const force = params.force === true
+      await registry.archiveSession(params.sessionId, force ? { stopActivity: true } : {})
+      return { ok: true, sessionId: params.sessionId, archived: true, force }
+    }
+
+    case 'sessions.unarchive': {
+      requireSessionId(params)
+      const registry = requireService(bridge, 'workspaceRegistry')
+      if (typeof registry.unarchiveSession !== 'function') {
+        throw new BridgeError('unavailable', '这个 Host 的 workspaceRegistry 不支持 unarchiveSession')
+      }
+      await registry.unarchiveSession(params.sessionId)
+      return { ok: true, sessionId: params.sessionId, archived: false }
+    }
+
     case 'sessions.rename':
       requireSessionId(params)
       return controller.rename({ sessionId: params.sessionId, title: String(params.title ?? '') })
