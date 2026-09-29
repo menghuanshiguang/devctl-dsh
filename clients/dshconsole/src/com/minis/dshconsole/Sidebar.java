@@ -108,7 +108,7 @@ public class Sidebar {
         foot.addView(seg);
         root.addView(foot);
 
-        // 底部设置入口：点开是本地暗色二级菜单（原顶栏 ⋮ 的白底弹窗已撤）
+        // 底部：⚙ 设置（新活动，实时读 DSH 设置）+ ⚒ 调试（原来的本地运维菜单）
         View line = new View(act);
         line.setBackgroundColor(Ui.STROKE);
         root.addView(line, new LinearLayout.LayoutParams(
@@ -117,21 +117,45 @@ public class Sidebar {
         LinearLayout setRow = Ui.row(act);
         setRow.setGravity(Gravity.CENTER_VERTICAL);
         setRow.setMinimumHeight(Ui.dp(act, 44));
-        setRow.setPadding(Ui.dp(act, 4), 0, Ui.dp(act, 4), 0);
-        Ui.press(setRow, act, 0x00000000, Ui.R_CHIP);
-        setRow.addView(Ui.tv(act, "\u2699  \u8bbe\u7f6e", 13.5f, Ui.DIM),
+        setRow.setPadding(Ui.dp(act, 2), 0, Ui.dp(act, 2), 0);
+        setRow.addView(footAction("\u2699  \u8bbe\u7f6e", 0),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        setRow.addView(Ui.tv(act, "\u203a", 15f, Ui.MUT));
-        setRow.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                settingsMenu(v);
-            }
-        });
+        setRow.addView(footAction("\u2692  \u8c03\u8bd5", 1),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(setRow);
     }
 
+    /** 底部两个入口：0 = 设置（新活动），1 = 调试（原来的运维菜单）。 */
+    private View footAction(String label, final int which) {
+        LinearLayout b = Ui.row(act);
+        b.setGravity(Gravity.CENTER_VERTICAL);
+        b.setPadding(Ui.dp(act, 8), Ui.dp(act, 10), Ui.dp(act, 8), Ui.dp(act, 10));
+        Ui.press(b, act, 0x00000000, Ui.R_CHIP);
+        b.addView(Ui.tv(act, label, 13.5f, Ui.DIM),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        b.addView(Ui.tv(act, "\u203a", 15f, Ui.MUT));
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (which == 0) openSettings();
+                else debugMenu(v);
+            }
+        });
+        return b;
+    }
+
+    /** 打开独立的设置活动（web 展示：侧边栏一级 → 二级）。 */
+    private void openSettings() {
+        try {
+            android.content.Intent it = new android.content.Intent(act, SettingsActivity.class);
+            act.startActivity(it);
+        } catch (Throwable t) {
+            android.widget.Toast.makeText(act, "\u6253\u5f00\u8bbe\u7f6e\u5931\u8d25\uff1a" + t,
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+
     /** 二级菜单：贴着「设置」行弹出的暗色小面板。 */
-    private void settingsMenu(View anchor) {
+    private void debugMenu(View anchor) {
         LinearLayout box = Ui.col(act);
         box.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, act));
         int p = Ui.dp(act, 6);
