@@ -46,8 +46,15 @@ public class Ui {
             p.setShadowLayer(dp(c, blurDp), 0, dp(c, dyDp), shadow);
         }
 
+        /** 形状按 view 的 padding 反推（正好是卡片那一圈），模糊就晕在 padding 里。
+         *  不能信 getBounds()：背景 bounds 到底是整块还是内容区各家实现不一致，画歪了就被卡面盖住。 */
         @Override public void draw(android.graphics.Canvas cv) {
-            cv.drawRoundRect(new android.graphics.RectF(getBounds()), rad, rad, p);   // 内容区即卡片
+            android.view.View v = (getCallback() instanceof android.view.View)
+                    ? (android.view.View) getCallback() : null;
+            if (v == null) { cv.drawRoundRect(new android.graphics.RectF(getBounds()), rad, rad, p); return; }
+            cv.drawRoundRect(new android.graphics.RectF(v.getPaddingLeft(), v.getPaddingTop(),
+                    v.getWidth() - v.getPaddingRight(), v.getHeight() - v.getPaddingBottom()),
+                    rad, rad, p);
         }
 
         @Override public void setAlpha(int a) { p.setAlpha(a); }
