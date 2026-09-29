@@ -1453,6 +1453,7 @@ public class ChatView extends ScrollView {
                     open = !open;
                     body.setVisibility(open ? View.VISIBLE : View.GONE);
                     if (bodyWrap != null) bodyWrap.setVisibility(open ? View.VISIBLE : View.GONE);
+                    if (open && bodyWrap != null) bodyWrap.scrollTo(0, 0);   // 展开时从头上看起
                     refresh();
                     toggleInPlace(head);
                 }
@@ -1460,8 +1461,15 @@ public class ChatView extends ScrollView {
             Ui.press(head, ctx, Ui.SURF2, Ui.R_CHIP);      // 表头常驻：思考完也留着，随时可点着折叠
             box.addView(head, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            box.addView(body, new LinearLayout.LayoutParams(
+            Ui.MaxScroll frame = new Ui.MaxScroll(ctx);           // 大框：表头是框顶盖，流式思考只在框内滚
+            frame.maxH = Ui.dp(ctx, 280);
+            frame.addView(body, new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT));
+            box.addView(frame, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            bodyWrap = frame;
+            scroll = frame;
             refresh();
         }
 
@@ -1474,7 +1482,9 @@ public class ChatView extends ScrollView {
         }
 
         void follow() {
-            if (scroll != null) ((android.widget.ScrollView) scroll).fullScroll(View.FOCUS_DOWN);
+            if (scroll == null) return;
+            final android.widget.ScrollView sv = (android.widget.ScrollView) scroll;
+            sv.post(new Runnable() { public void run() { sv.fullScroll(View.FOCUS_DOWN); } });
         }
 
         /** \u6b63\u6587\u884c\uff1a\u5de6 20dp \u653e\u5706\u70b9/\u56fe\u6807\uff08\u7ad6\u8f68\u4ece\u6b63\u4e2d\u7a7f\u8fc7\uff09\uff0c\u53f3\u8fb9\u662f\u6587\u5b57\u3002 */
