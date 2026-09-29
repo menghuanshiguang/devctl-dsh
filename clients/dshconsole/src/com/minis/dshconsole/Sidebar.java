@@ -95,9 +95,17 @@ public class Sidebar {
 
         LinearLayout foot = Ui.row(a);
         foot.setPadding(0, Ui.dp(a, 6), 0, 0);
-        foot.addView(footBtn("设备", 3));
-        foot.addView(footBtn("事件", 4));
-        foot.addView(footBtn("模型/权限", 2));
+        LinearLayout seg = Ui.row(a);                                   // 一整条分段控件，不再是三块砖
+        seg.setGravity(Gravity.CENTER_VERTICAL);
+        seg.setBackground(Ui.surf(Ui.SURF2, 9, a));
+        int sp2 = Ui.dp(a, 3);
+        seg.setPadding(sp2, sp2, sp2, sp2);
+        seg.addView(footBtn("设备", 3));
+        seg.addView(segLine(a));
+        seg.addView(footBtn("事件", 4));
+        seg.addView(segLine(a));
+        seg.addView(footBtn("模型/权限", 2));
+        foot.addView(seg);
         root.addView(foot);
 
         // 底部设置入口：点开是本地暗色二级菜单（原顶栏 ⋮ 的白底弹窗已撤）
@@ -235,8 +243,18 @@ public class Sidebar {
             final boolean active = o.optBoolean("default", false)
                     || id.equals(act.store.lastWorkspace(act.dshName));
             String sub = (path.length() > 0 ? path : id) + " · " + kids.length() + " 个会话";
+            // 一个工作区 = 一张卡：父行 + 子会话 + 新建入口全收在卡里
+            LinearLayout grp = Ui.col(act);
+            grp.setBackground(Ui.surf(Ui.SURF, Ui.R_CARD, act));
+            int gp = Ui.dp(act, 6);
+            grp.setPadding(gp, gp, gp, gp);
+            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            glp.bottomMargin = Ui.dp(act, 10);
+            wsBox.addView(grp, glp);
+
             // 点父节点 = 就地展开/收起二次列表（不关抽屉，不然看不到子项）；长按重命名
-            wsBox.addView(row((open ? "▾ " : "▸ ") + title, sub, active, new Runnable() {
+            grp.addView(row((open ? "▾ " : "▸ ") + title, sub, false, new Runnable() {
                 public void run() {
                     if (openWs.contains(id)) openWs.remove(id);
                     else openWs.add(id);
@@ -250,7 +268,7 @@ public class Sidebar {
             }, Ui.TEXT));
             if (!open) continue;
             if (kids.length() == 0) {
-                wsBox.addView(subRow("(该工作区还没有会话)", "", false, null, null));
+                grp.addView(subRow("(该工作区还没有会话)", "", false, null, null));
             } else {
                 for (int j = 0; j < kids.length(); j++) {
                     final JSONObject s = kids.optJSONObject(j);
@@ -258,7 +276,7 @@ public class Sidebar {
                     final String sid = s.optString("sessionId", "");
                     final String st = s.optString("title", "");
                     final String t2 = st.length() > 0 ? st : "(未命名)";
-                    wsBox.addView(subRow(t2, TabSessions.age(s.optLong("updatedAt", 0)),
+                    grp.addView(subRow(t2, TabSessions.age(s.optLong("updatedAt", 0)),
                             sid.equals(act.chatTab().currentSessionId()), new Runnable() {
                                 public void run() {
                                     act.openChat(sid, t2);      // openChat 里会顺手回收抽屉
@@ -270,7 +288,7 @@ public class Sidebar {
                             }));
                 }
             }
-            wsBox.addView(subRow("＋ 在此工作区新建会话", "", false, new Runnable() {
+            grp.addView(subRow("＋ 在此工作区新建会话", "", false, new Runnable() {
                 public void run() {
                     newSessionIn(id);
                 }
@@ -312,9 +330,9 @@ public class Sidebar {
     /** 二次列表里的子行：左侧缩进，颜色压暗，跟父节点区分开。 */
     private View subRow(String title, String sub, boolean active, Runnable onClick, Runnable onLong) {
         LinearLayout wrap = Ui.col(act);
-        wrap.setPadding(Ui.dp(act, 12), 0, 0, 0);                // 子项靠缩进，不用 └ 树字符
+        wrap.setPadding(Ui.dp(act, 8), 0, 0, 0);                 // 卡内缩进一层，不用 └ 树字符
         LinearLayout pill = Ui.col(act);
-        pill.setBackground(Ui.surf(active ? Ui.CHIP_BG : Ui.SURF, Ui.R_CHIP, act));
+        if (active) pill.setBackground(Ui.surf(Ui.CHIP_BG, Ui.R_CHIP, act));   // 只有当前会话上蓝底
         pill.addView(row(title, sub, false, onClick, onLong, active ? Ui.ACCENT : Ui.DIM));
         wrap.addView(pill);
         return wrap;
@@ -625,13 +643,20 @@ public class Sidebar {
         return t;
     }
 
+    /** 分段控件里的竖分隔线。 */
+    private View segLine(android.content.Context c) {
+        View v = new View(c);
+        v.setBackgroundColor(Ui.STROKE);
+        v.setLayoutParams(new LinearLayout.LayoutParams(1, Ui.dp(c, 14)));
+        return v;
+    }
+
     private TextView footBtn(String text, final int tab) {
         TextView t = Ui.tv(act, text, 12.5f, Ui.DIM);
         t.setGravity(Gravity.CENTER);
-        t.setPadding(0, Ui.dp(act, 7), 0, Ui.dp(act, 7));
-        t.setBackground(Ui.bg(Ui.PANEL2, 9, act));
+        t.setPadding(0, Ui.dp(act, 8), 0, Ui.dp(act, 8));
+        Ui.press(t, act, 0x00000000, Ui.dp(act, 8));            // 底由整条控件兜，按键只留按压反馈
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        lp.rightMargin = Ui.dp(act, 6);
         t.setLayoutParams(lp);
         t.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
