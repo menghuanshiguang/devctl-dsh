@@ -140,6 +140,7 @@ public class SettingsActivity extends Activity {
             public void run() {
                 store.set("runMode", MainActivity.MODE_LOCAL);
                 onModeChanged();
+                checkLocalOrGuide();
             }
         }));
         modeCard.addView(head);
@@ -153,14 +154,24 @@ public class SettingsActivity extends Activity {
                 : "远端 · " + (dev == null || dev.addr().length() == 0 ? "未配对" : dev.addr());
         modeCard.addView(Ui.tv(this, line, 12f, local ? Ui.AMBER : Ui.MUT));
         if (local) {
+            LinearLayout links = Ui.row(this);
             TextView cfg = Ui.tv(this, "本机地址 / 令牌…", 12f, Ui.ACCENT);
-            cfg.setPadding(0, Ui.dp(this, 6), 0, 0);
+            cfg.setPadding(0, Ui.dp(this, 6), Ui.dp(this, 14), 0);
             cfg.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     editLocal();
                 }
             });
-            modeCard.addView(cfg);
+            links.addView(cfg);
+            TextView guide = Ui.tv(this, "本地环境引导…", 12f, Ui.ACCENT);
+            guide.setPadding(0, Ui.dp(this, 6), 0, 0);
+            guide.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    showLocalGuide(null);
+                }
+            });
+            links.addView(guide);
+            modeCard.addView(links);
         }
     }
 
@@ -194,6 +205,150 @@ public class SettingsActivity extends Activity {
             }
         });
         return t;
+    }
+
+    /** 切到本地后探一下：连不上就把安装引导摆出来，别让用户对着"连不上"发呆。 */
+    private void checkLocalOrGuide() {
+        final Store.Dev d = MainActivity.localDevOf(store);
+        new Thread(new Runnable() {
+            public void run() {
+                final String why = probeLocal(d);
+                if (why == null) return;                 // 已经通着，什么都不用说
+                ui.post(new Runnable() {
+                    public void run() {
+                        showLocalGuide(why);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 探一下本地端口；通了返回 null，不通返回人话原因。 */
+    private String probeLocal(Store.Dev d) {
+        java.net.Socket s = new java.net.Socket();
+        try {
+            s.connect(new java.net.InetSocketAddress(d.host, d.port), 1200);
+            return null;
+        } catch (Throwable t) {
+            String m = t.getMessage() == null ? "" : t.getMessage().toLowerCase();
+            if (m.contains("refused")) return d.addr() + " 上没有东西在监听";
+            if (m.contains("timeout") || m.contains("timed out")) return d.addr() + " 没响应（超时）";
+            return "连不上 " + d.addr();
+        } finally {
+            try {
+                s.close();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /**
+     * 本地 harness 的安装引导。
+     * app 自己没法在 Android 上跑 Node（harness 的原生模块只有 glibc 构建），
+     * 所以这里把"在这台手机上准备一个 Linux 环境"的每一步摆出来，边装边检测。
+     */
+    private void showLocalGuide(String why) {
+        final Store.Dev d = MainActivity.localDevOf(store);
+        LinearLayout box = Ui.col(this);
+        int p = Ui.dp(this, 16);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+
+        ScrollView sc = new ScrollView(this);
+        LinearLayout inner = Ui.col(this);
+        sc.addView(inner);
+
+        inner.addView(Ui.tv(this, why == null ? ("目标 " + d.addr()) : ("状态 · " + why),
+                12.5f, why == null ? Ui.MUT : Ui.AMBER));
+        inner.addView(Ui.gap(this, 6));
+        inner.addView(Ui.tv(this, "本地模式 = 这台手机自己当 host。App 侧已经就绪（免令牌、协议不变），"
+                + "还差一个能跑 harness 的 Linux 环境：", 12.5f, Ui.DIM));
+        inner.addView(Ui.gap(this, 10));
+        inner.addView(step("1", "装 Termux（F-Droid 版）并准备 Ubuntu", "pkg update && pkg install -y proot-distro",
+                "proot-distro install ubuntu"));
+        inner.addView(step("2", "进 Ubuntu，装 Node 和 git", "proot-distro login ubuntu",
+                "apt update && apt install -y nodejs npm git"));
+        inner.addView(step("3", "拉仓库并启动本地 harness", "git clone https://github.com/menghuanshiguang/devctl-dsh",
+                "sh devctl-dsh/clients/dshconsole/local/start-local.sh devctl-dsh"));
+        inner.addView(step("4", "给本地 harness 配一个模型密钥（它是一台独立的 DSH，要用自己的）", null, null));
+        inner.addView(Ui.gap(this, 8));
+        inner.addView(Ui.tv(this, "跑起来后脚本会打印端口（默认 7788，只绑回环、免令牌）。"
+                + "点下面「检测」我就去探一次，通了自动回本地模式。", 12f, Ui.MUT));
+
+        box.addView(sc, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("本地环境引导")
+                .setView(box)
+                .setPositiveButton("检测连接", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface dlg, int w) {
+                        new Thread(new Runnable() {
+                            public void run() {
+                                final String bad = probeLocal(d);
+                                ui.post(new Runnable() {
+                                    public void run() {
+                                        if (bad == null) {
+                                            Toast.makeText(SettingsActivity.this,
+                                                    "本地 harness 通了 · " + d.addr(), Toast.LENGTH_LONG).show();
+                                            onModeChanged();
+                                        } else {
+                                            Toast.makeText(SettingsActivity.this, "还没通：" + bad,
+                                                    Toast.LENGTH_LONG).show();
+                                        }
+                                    }
+                                });
+                            }
+                        }).start();
+                    }
+                })
+                .setNeutralButton("切回远端", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface dlg, int w) {
+                        store.set("runMode", MainActivity.MODE_REMOTE);
+                        onModeChanged();
+                    }
+                })
+                .setNegativeButton("知道了", null)
+                .show();
+    }
+
+    /** 一行步骤：序号 + 说明 + 可复制的命令。 */
+    private View step(String no, String text, String cmd1, String cmd2) {
+        LinearLayout row = Ui.row(this);
+        row.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
+        TextView n = Ui.tv(this, no, 12f, Ui.MUT);
+        n.setPadding(0, 0, Ui.dp(this, 8), 0);
+        row.addView(n);
+        LinearLayout col = Ui.col(this);
+        col.addView(Ui.tv(this, text, 12.5f, Ui.TEXT));
+        if (cmd1 != null) col.addView(cmdRow(cmd1));
+        if (cmd2 != null) col.addView(cmdRow(cmd2));
+        row.addView(col, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        return row;
+    }
+
+    private View cmdRow(final String cmd) {
+        LinearLayout r = Ui.row(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(0, Ui.dp(this, 3), 0, Ui.dp(this, 3));
+        TextView t = Ui.tv(this, cmd, 11.5f, Ui.DIM);
+        t.setTypeface(android.graphics.Typeface.MONOSPACE);
+        r.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView copy = Ui.tv(this, "复制", 11.5f, Ui.ACCENT);
+        copy.setPadding(Ui.dp(this, 8), 0, 0, 0);
+        copy.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                try {
+                    Object svc = getSystemService("clipboard");
+                    if (svc instanceof android.content.ClipboardManager) {
+                        ((android.content.ClipboardManager) svc).setPrimaryClip(
+                                android.content.ClipData.newPlainText("cmd", cmd));
+                    }
+                    Toast.makeText(SettingsActivity.this, "命令已复制", Toast.LENGTH_SHORT).show();
+                } catch (Throwable ignored) {
+                }
+            }
+        });
+        r.addView(copy);
+        return r;
     }
 
     /** 本地模式的三件套：地址、端口、令牌（本地 harness 起在手机上时用它）。 */
