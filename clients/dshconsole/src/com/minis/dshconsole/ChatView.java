@@ -1263,21 +1263,47 @@ public class ChatView extends ScrollView {
         lp.gravity = android.view.Gravity.END;
         col.addView(v, lp);
     }
-    // \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 \u8f68\u8ff9\u65f6\u95f4\u7ebf\uff1a\u601d\u8003\u6bb5\u843d + \u5de5\u5177\u884c\u5408\u6210\u4e00\u6761\u7ad6\u8f68\uff08\u7167\u8c46\u5305\u90a3\u79cd\uff09 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+    // \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 \u8f68\u8ff9\uff1a\u601d\u8003\u6bb5\u843d + \u5de5\u5177\u884c\u5408\u6210\u4e00\u6761\u7ad6\u8f68\uff08\u9762\u677f\u5e38\u9a7b / \u5217\u8868\u5185\u5d4c\u4e24\u79cd\u5bbf\u4e3b\uff09 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
     private Trace trace;
     private int traceAnchor = -1;
     private TextView lastToolDet;                 // \u6700\u540e\u4e00\u6761\u5de5\u5177\u884c\u7684\u8be6\u60c5\u6846\uff08\u7ed3\u679c\u56de\u6765\u65f6\u5f80\u91cc\u585e\uff09
     private String lastToolArgs = "";
+    private View traceCard;                       // \u9762\u677f\u5916\u58f3\uff08TabChat \u7ed9\uff09
+    private LinearLayout traceHeadHost, traceBodyHost;
+    private View traceScrollView;
 
-    /** \u8f68\u8ff9\u8fd8\u5728\u539f\u4f4d\u5417\uff1f\u4e2d\u95f4\u63d2\u4e86\u6b63\u6587/\u65b0\u6d88\u606f\u5c31\u6536\u53e3\uff0c\u4e0b\u4e00\u6bb5\u601d\u8003\u518d\u5f00\u4e00\u6761\u3002 */
+    /** TabChat \u628a\u300c\u6d88\u606f\u533a\u4e0a\u65b9\u7684\u601d\u8003\u9762\u677f\u300d\u63a5\u8fdb\u6765\uff1a\u6807\u9898\u5bbf\u4e3b + \u6b63\u6587\u5bbf\u4e3b + \u6b63\u6587\u6eda\u52a8\u6761\u3002 */
+    public void setTraceHost(View card, LinearLayout headHost, LinearLayout bodyHost, View scroll) {
+        traceCard = card;
+        traceHeadHost = headHost;
+        traceBodyHost = bodyHost;
+        traceScrollView = scroll;
+    }
+
+    /** \u8f68\u8ff9\u8fd8\u5728\u539f\u4f4d\u5417\uff1f\u5217\u8868\u6a21\u5f0f\u4e0b\u4e2d\u95f4\u63d2\u4e86\u6b63\u6587/\u65b0\u6d88\u606f\u5c31\u6536\u53e3\uff0c\u4e0b\u4e00\u6bb5\u601d\u8003\u53e6\u5f00\u4e00\u6761\u3002 */
     private Trace traceLive() {
+        if (traceHeadHost != null) return trace;      // \u9762\u677f\u6a21\u5f0f\u4e0d\u53c2\u4e0e\u5217\u8868\u9519\u4f4d\u5224\u65ad
         if (trace != null && (col == null || col.getChildCount() - 1 != traceAnchor)) traceEnd();
         return trace;
     }
 
-    /** \u5f00\u4e00\u6761\u8f68\u8ff9\uff1a\u53ef\u6298\u53e0\u6807\u9898 + \u5e26\u7ad6\u8f68\u7684\u6b63\u6587\u533a\u3002 */
-    public void thinkStart() {
-        if (traceLive() != null) return;
+    /** \u771f\u5f00\u4e00\u6761\u8f68\u8ff9\uff1a\u6709\u9762\u677f\u5c31\u6302\u8fdb\u9762\u677f\uff08\u66ff\u6362\u4e0a\u4e00\u6761\uff09\uff0c\u6ca1\u6709\u5c31\u843d\u5728\u6d88\u606f\u6d41\u91cc\u3002 */
+    private void openTrace() {
+        if (traceHeadHost != null) {
+            trace = new Trace();
+            trace.bodyWrap = traceScrollView;
+            trace.scroll = traceScrollView;
+            if (traceCard != null) traceCard.setVisibility(View.VISIBLE);
+            if (traceScrollView != null) traceScrollView.setVisibility(View.VISIBLE);
+            traceHeadHost.removeAllViews();
+            traceBodyHost.removeAllViews();
+            traceHeadHost.addView(trace.head, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            traceBodyHost.addView(trace.body, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            return;
+        }
         dropEmpty();
         hasContent = true;
         spacer(Ui.S2);
@@ -1286,7 +1312,18 @@ public class ChatView extends ScrollView {
         traceAnchor = col.getChildCount() - 1;
     }
 
-    /** \u601d\u8003\u589e\u91cf\uff1a\u63a5\u5728\u5f53\u524d\u6bb5\u843d\u540e\u9762\uff1b\u4e0a\u4e00\u6761\u662f\u5de5\u5177\u884c\u5c31\u53e6\u8d77\u4e00\u6bb5\uff08\u8ddf\u8c46\u5305\u4e00\u6837\u5206\u6bb5\uff09\u3002 */
+    /** \u5f00\u4e00\u6761\u8f68\u8ff9\uff08\u540c\u4e00\u8f6e\u91cc\u91cd\u590d\u8c03\u7528\u4f1a\u63a5\u5230\u5f53\u524d\u8fd9\u6761\u4e0a\uff09\u3002 */
+    public void thinkStart() {
+        if (traceHeadHost != null) {
+            if (trace != null && !trace.done) return;
+            openTrace();
+            return;
+        }
+        if (traceLive() != null) return;
+        openTrace();
+    }
+
+    /** \u601d\u8003\u589e\u91cf\uff1a\u63a5\u5728\u5f53\u524d\u6bb5\u843d\u540e\u9762\uff0c\u4e0a\u4e00\u6761\u662f\u5de5\u5177\u884c\u5c31\u53e6\u8d77\u4e00\u6bb5\u3002 */
     public void thinkAppend(String chunk) {
         if (chunk == null || chunk.length() == 0) return;
         thinkStart();
@@ -1294,7 +1331,14 @@ public class ChatView extends ScrollView {
         scroll(false);
     }
 
-    /** \u601d\u8003\u7ed3\u675f\uff1a\u6807\u9898\u6362\u6210\u300c\u5df2\u601d\u8003\uff08\u7528\u65f6 N \u79d2\uff09\u300d\uff0c\u6b63\u6587\u7559\u5728\u539f\u5730\uff0c\u70b9\u6807\u9898\u8fd8\u80fd\u6536\u8d77\u6765\u3002 */
+    /** \u601d\u8003\u7ed3\u675f\uff1a\u6807\u9898\u5b9a\u7a3f\u6210\u300c\u5df2\u601d\u8003\uff08\u7528\u65f6 N \u79d2\uff09\u300d\uff0c\u6b63\u6587\u6536\u8d77\uff08\u70b9\u6807\u9898\u8fd8\u80fd\u518d\u5c55\u5f00\uff09\u3002 */
+    public void thinkEnd() {
+        if (trace == null) return;
+        trace.finish();
+        if (traceHeadHost == null) { trace = null; traceAnchor = -1; }
+        scroll(false);
+    }
+
     private void traceEnd() {
         if (trace == null) return;
         trace.finish();
@@ -1302,68 +1346,81 @@ public class ChatView extends ScrollView {
         traceAnchor = -1;
     }
 
-    public void thinkEnd() {
-        if (trace == null) return;
-        traceEnd();
-        scroll(false);
-    }
-
-    /** \u5de5\u5177\u8c03\u7528\uff1a\u5728\u8f68\u8ff9\u91cc\u843d\u4e00\u884c\u300c\u56fe\u6807 + \u4e2d\u6587\u6458\u8981\u300d\uff0c\u70b9\u8fd9\u884c\u624d\u770b\u53c2\u6570/\u7ed3\u679c\u3002 */
+    /** \u5de5\u5177\u8c03\u7528\uff1a\u5728\u8f68\u8ff9\u91cc\u843d\u4e00\u884c\u300c\u56fe\u6807 + \u4e2d\u6587\u6458\u8981\u300d\uff0c\u70b9\u8fd9\u884c\u770b\u53c2\u6570\u3002 */
     public void tool(String name, String args) {
         thinkStart();
         trace.toolRow(name, args);
         scroll(false);
     }
 
-    /** \u5de5\u5177\u7ed3\u679c\uff1a\u585e\u8fdb\u4e0a\u4e00\u6761\u5de5\u5177\u884c\u7684\u8be6\u60c5\u91cc\uff1b\u6ca1\u6709\u5bf9\u5e94\u884c\uff08\u5386\u53f2\u56de\u653e\uff09\u5c31\u81ea\u5df1\u843d\u4e00\u884c\u3002 */
+    /** \u5de5\u5177\u7ed3\u679c\uff1a\u585e\u8fdb\u4e0a\u4e00\u884c\u5de5\u5177\u884c\u7684\u8be6\u60c5\u91cc\uff1b\u6ca1\u6709\u5bf9\u5e94\u884c\u5c31\u81ea\u5df1\u843d\u4e00\u884c\u3002 */
     public void toolResult(String text, boolean err) {
         if (traceLive() == null) thinkStart();
         trace.result(text, err);
         scroll(false);
     }
 
-    /** \u5de5\u5177\u540d \u2192 \u5c0f\u56fe\u6807\u3002 */
-    private String toolGlyph(String name) {
-        String s = name == null ? "" : name.toLowerCase();
-        if (s.indexOf("search") >= 0 || s.indexOf("web") >= 0) return "\uD83D\uDD0D";
-        if (s.indexOf("fetch") >= 0 || s.indexOf("browse") >= 0 || s.indexOf("visit") >= 0
-                || s.indexOf("http") >= 0 || s.indexOf("open") >= 0) return "\uD83C\uDF10";
-        if (s.indexOf("read") >= 0 || s.indexOf("cat") >= 0) return "\uD83D\uDCC4";
-        if (s.indexOf("write") >= 0 || s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) return "\u270F\uFE0F";
-        if (s.indexOf("bash") >= 0 || s.indexOf("shell") >= 0 || s.indexOf("exec") >= 0) return "\uD83D\uDDA5\uFE0F";
-        if (s.indexOf("list") >= 0 || s.indexOf("ls") >= 0 || s.indexOf("glob") >= 0
-                || s.indexOf("find") >= 0) return "\uD83D\uDCC1";
-        if (s.indexOf("grep") >= 0 || s.indexOf("code") >= 0) return "\uD83D\uDD0E";
+    /** \u628a\u4e00\u6bb5\u53c2\u6570\u538b\u6210\u4e00\u884c\u77ed\u6458\u8981\uff1a\u8f6c\u4e49\u6362\u884c\u3001\u5236\u8868\u3001\u591a\u4f59\u7a7a\u767d\u5168\u6536\u6389\uff0c\u8d85\u957f\u622a\u65ad\u3002 */
+    private String clean(String s, int max) {
+        if (s == null) return "";
+        String t = s.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
+                .replace("\n", " ").replace("\r", " ").replace("\t", " ")
+                .replace("\\\"", "\"").replace("\\\\", "\\");
+        t = t.replaceAll("\\s+", " ").trim();
+        if (t.length() > max) t = t.substring(0, max) + "\u2026";
+        return t;
+    }
+
+    private String toolGlyph(String name, String args) {
+        String s = (name == null ? "" : name).toLowerCase() + " " + clean(args, 80).toLowerCase();
+        if (s.indexOf("search") >= 0) return "\ud83d\udd0d";
+        if (s.indexOf("fetch") >= 0 || s.indexOf("browse") >= 0 || s.indexOf("http") >= 0) return "\ud83c\udf10";
+        if (s.indexOf("read") >= 0 || s.indexOf("cat ") >= 0) return "\ud83d\udcc4";
+        if (s.indexOf("write") >= 0 || s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) return "\u270f\ufe0f";
+        if (s.indexOf("bash") >= 0 || s.indexOf("shell") >= 0 || s.indexOf("exec") >= 0
+                || s.indexOf("cd ") >= 0 || s.indexOf("python") >= 0 || s.indexOf("git ") >= 0
+                || s.indexOf("npm ") >= 0 || s.indexOf("powershell") >= 0) return "\ud83d\udda5\ufe0f";
+        if (s.indexOf("ls ") >= 0 || s.indexOf("list") >= 0 || s.indexOf("glob") >= 0
+                || s.indexOf("dir ") >= 0) return "\ud83d\udcc1";
+        if (s.indexOf("grep") >= 0) return "\ud83d\udd0e";
         return "\u2699";
     }
 
-    /** \u5de5\u5177\u540d + \u53c2\u6570 \u2192 \u300c\u641c\u7d22\u7f51\u9875 \u00b7 \u9a6c\u65af\u514b \u540c\u6027\u604b\u300d\u8fd9\u79cd\u4e2d\u6587\u6458\u8981\u3002 */
     private String toolLabel(String name, String args) {
         String s = name == null ? "" : name.toLowerCase();
         String v;
-        if (s.indexOf("search") >= 0) v = "\u641C\u7D22\u7F51\u9875";
+        if (s.indexOf("search") >= 0) v = "\u641c\u7d22\u7f51\u9875";
         else if (s.indexOf("fetch") >= 0 || s.indexOf("browse") >= 0 || s.indexOf("visit") >= 0
-                || s.indexOf("http") >= 0 || s.indexOf("open") >= 0) v = "\u6D4F\u89C8\u7F51\u9875";
-        else if (s.indexOf("read") >= 0 || s.indexOf("cat") >= 0) v = "\u8BFB\u53D6\u6587\u4EF6";
-        else if (s.indexOf("write") >= 0 || s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) v = "\u5199\u5165\u6587\u4EF6";
-        else if (s.indexOf("bash") >= 0 || s.indexOf("shell") >= 0 || s.indexOf("exec") >= 0) v = "\u6267\u884C\u547D\u4EE4";
+                || s.indexOf("http") >= 0 || s.indexOf("open") >= 0) v = "\u6d4f\u89c8\u7f51\u9875";
+        else if (s.indexOf("read") >= 0 || s.indexOf("cat") >= 0) v = "\u8bfb\u53d6\u6587\u4ef6";
+        else if (s.indexOf("write") >= 0 || s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) v = "\u5199\u5165\u6587\u4ef6";
+        else if (s.indexOf("bash") >= 0 || s.indexOf("shell") >= 0 || s.indexOf("exec") >= 0) v = "\u6267\u884c\u547d\u4ee4";
         else if (s.indexOf("list") >= 0 || s.indexOf("ls") >= 0 || s.indexOf("glob") >= 0
-                || s.indexOf("find") >= 0) v = "\u67E5\u770B\u76EE\u5F55";
-        else if (s.indexOf("grep") >= 0) v = "\u68C0\u7D22\u5185\u5BB9";
-        else v = "\u8C03\u7528\u5DE5\u5177";
+                || s.indexOf("find") >= 0) v = "\u67e5\u770b\u76ee\u5f55";
+        else if (s.indexOf("grep") >= 0) v = "\u68c0\u7d22\u5185\u5bb9";
+        else v = cmdLike(args) ? "\u6267\u884c\u547d\u4ee4" : "\u8c03\u7528\u5de5\u5177";
         String extra = pickArg(args, "query");
-        if (extra.length() == 0) extra = pickArg(args, "path");
         if (extra.length() == 0) extra = pickArg(args, "command");
-        if (extra.length() == 0) extra = name == null ? "" : name;
-        if (extra.length() > 34) extra = extra.substring(0, 34) + "\u2026";
-        return v + (extra.length() == 0 ? "" : " \u00B7 " + extra);
+        if (extra.length() == 0) extra = pickArg(args, "path");
+        if (extra.length() == 0) extra = pickArg(args, "url");
+        if (extra.length() == 0) extra = args == null ? "" : args;
+        extra = clean(extra, 30);
+        return extra.length() == 0 ? v : v + " \u00b7 " + extra;
     }
 
-    /** \u4ece\u5de5\u5177\u53c2\u6570 JSON \u91cc\u62a0\u4e00\u4e2a\u5b57\u7b26\u4e32\u5b57\u6bb5\u3002 */
+    private boolean cmdLike(String args) {
+        String c = clean(args, 60).toLowerCase();
+        if (c.length() == 0) return false;
+        return c.indexOf("cd ") == 0 || c.indexOf("python") == 0 || c.indexOf("npm ") == 0
+                || c.indexOf("git ") == 0 || c.indexOf("ls ") == 0 || c.indexOf("dir ") == 0
+                || c.indexOf("$") == 0 || c.indexOf("@\\\"") == 0 || c.indexOf("echo ") == 0;
+    }
+
+    /** \u4ece\u5de5\u5177\u53c2\u6570 JSON \u91cc\u62a0\u4e00\u4e2a\u5b57\u7b26\u4e32\u5b57\u6bb5\uff08query/path/command/url \u4e4b\u7c7b\uff09\u3002 */
     private String pickArg(String args, String key) {
         if (args == null || args.length() == 0) return "";
         java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"" + key + "\"\\s*:\\s*\"([^\"]{0,140})\"").matcher(args);
+                .compile("\"" + key + "\"\\s*:\\s*\"([^\"]{0,200})\"").matcher(args);
         return m.find() ? m.group(1) : "";
     }
 
@@ -1377,21 +1434,24 @@ public class ChatView extends ScrollView {
         int tools, paras;
         boolean done, open = true, lastTool;
         TextView paraTv;
+        View bodyWrap, scroll;
 
         Trace() {
             head.setTextSize(Ui.FS_SMALL);
             head.setTextColor(Ui.MUT);
             head.setTypeface(Typeface.MONOSPACE);
             head.setSingleLine(true);
-            head.setPadding(0, Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3));
+            head.setPadding(0, Ui.dp(ctx, 4), 0, Ui.dp(ctx, 4));
+            head.setGravity(android.view.Gravity.CENTER_VERTICAL);
             body.setBackground(new Ui.Rail(Ui.STROKE, Ui.dp(ctx, 9), Ui.dp(ctx, 2),
                     Ui.dp(ctx, 10), Ui.dp(ctx, 12)));
             head.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     open = !open;
                     body.setVisibility(open ? View.VISIBLE : View.GONE);
+                    if (bodyWrap != null) bodyWrap.setVisibility(open ? View.VISIBLE : View.GONE);
                     refresh();
-                    toggleInPlace(box);
+                    toggleInPlace(head);
                 }
             });
             Ui.press(head, ctx, 0x00000000, Ui.R_CHIP);
@@ -1402,17 +1462,19 @@ public class ChatView extends ScrollView {
             refresh();
         }
 
-        /** \u6807\u9898\uff1a\u6d41\u5f0f\u671f\u95f4\u300c\u601d\u8003\u4e2d\u2026\u300d\uff0c\u7ed3\u675f\u540e\u300c\u5df2\u601d\u8003\uff08\u7528\u65f6 N \u79d2\uff09\u300d\uff1b\u53ea\u6709\u5de5\u5177\u65f6\u6309\u6761\u6570\u3002 */
         void refresh() {
             String s;
-            if (!done) s = paras > 0 ? "\u601D\u8003\u4E2D\u2026" : "\u8C03\u7528\u5DE5\u5177\u4E2D\u2026";
-            else if (paras > 0) s = "\u5DF2\u601D\u8003\uFF08\u7528\u65F6 "
-                    + (int) Math.max(1, (System.currentTimeMillis() - at + 999) / 1000) + " \u79D2\uFF09";
-            else s = "\u5DE5\u5177\u8C03\u7528 \u00D7" + tools;
-            head.setText(s + (open ? "  \u25BE" : "  \u25B8"));
+            if (!done) s = paras > 0 ? "\u601d\u8003\u4e2d\u2026" : "\u8c03\u7528\u5de5\u5177\u4e2d\u2026";
+            else if (paras > 0) s = "\u5df2\u601d\u8003\uff08\u7528\u65f6 " + (int) Math.max(1, (System.currentTimeMillis() - at + 999) / 1000) + " \u79d2\uff09";
+            else s = "\u5de5\u5177\u8c03\u7528 \u00d7" + tools;
+            head.setText(s + (open ? "  \u25be" : "  \u25b8"));
         }
 
-        /** \u6b63\u6587\u884c\uff1a\u5de6\u8fb9 20dp \u653e\u5706\u70b9/\u56fe\u6807\uff08\u7ad6\u8f68\u4ece\u6b63\u4e2d\u7a7f\u8fc7\uff09\uff0c\u53f3\u8fb9\u662f\u6587\u5b57\u3002 */
+        void follow() {
+            if (scroll != null) ((android.widget.ScrollView) scroll).fullScroll(View.FOCUS_DOWN);
+        }
+
+        /** \u6b63\u6587\u884c\uff1a\u5de6 20dp \u653e\u5706\u70b9/\u56fe\u6807\uff08\u7ad6\u8f68\u4ece\u6b63\u4e2d\u7a7f\u8fc7\uff09\uff0c\u53f3\u8fb9\u662f\u6587\u5b57\u3002 */
         TextView line(String mark, int markColor, int textColor) {
             LinearLayout row = new LinearLayout(ctx);
             row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1439,15 +1501,16 @@ public class ChatView extends ScrollView {
 
         void para(String chunk) {
             if (paraTv == null || lastTool) {
-                paraTv = line("\u2022", Ui.STROKE, Ui.DIM);
+                paraTv = line("\u2022", Ui.MUT, Ui.DIM);
                 paraBuf.setLength(0);
                 paras++;
                 lastTool = false;
-                refresh();                    // \u53ea\u5728\u8d77\u65b0\u6bb5\u65f6\u5237\u6807\u9898\uff1a\u6d41\u5f0f\u671f\u95f4\u522b\u6bcf\u5e27 setText
+                refresh();                  // \u53ea\u5728\u8d77\u65b0\u6bb5\u65f6\u5237\u6807\u9898\uff1a\u6d41\u5f0f\u671f\u95f4\u522b\u6bcf\u5e27 setText
             }
             paraBuf.append(chunk);
             paraTv.setText(paraBuf.length() > 2600
                     ? "\u2026" + paraBuf.substring(paraBuf.length() - 2600) : paraBuf);
+            follow();
         }
 
         void toolRow(String name, String args) {
@@ -1458,7 +1521,7 @@ public class ChatView extends ScrollView {
             LinearLayout row = new LinearLayout(ctx);
             row.setOrientation(LinearLayout.HORIZONTAL);
             TextView mk = new TextView(ctx);
-            mk.setText(toolGlyph(name));
+            mk.setText(toolGlyph(name, args));
             mk.setTextSize(Ui.FS_SMALL);
             mk.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             row.addView(mk, new LinearLayout.LayoutParams(Ui.dp(ctx, 20),
@@ -1467,6 +1530,7 @@ public class ChatView extends ScrollView {
             tx.setText(toolLabel(name, args));
             tx.setTextSize(Ui.FS_SMALL);
             tx.setTextColor(Ui.TEXT);
+            tx.setLineSpacing(Ui.dp(ctx, 4), 1f);
             row.addView(tx, new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             final LinearLayout item = Ui.col(ctx);
@@ -1479,7 +1543,9 @@ public class ChatView extends ScrollView {
             det.setBackground(Ui.bg(Ui.SURF2, 10, ctx));
             det.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
             det.setVisibility(View.GONE);
-            det.setText(args == null || args.trim().length() == 0 ? "(\u65E0\u53C2\u6570)" : args.trim());
+            String raw = args == null ? "" : args.trim();
+            det.setText((name == null || name.length() == 0 ? "" : name + "\n")
+                    + (raw.length() == 0 ? "(\u65e0\u53c2\u6570)" : raw));
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             dlp.leftMargin = Ui.dp(ctx, 20);
@@ -1489,6 +1555,7 @@ public class ChatView extends ScrollView {
                 public void onClick(View v) {
                     det.setVisibility(det.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
                     toggleInPlace(item);
+                    follow();
                 }
             });
             Ui.press(item, ctx, 0x00000000, Ui.R_CHIP);
@@ -1497,16 +1564,17 @@ public class ChatView extends ScrollView {
             lp.topMargin = Ui.dp(ctx, 6);
             body.addView(item, lp);
             lastToolDet = det;
-            lastToolArgs = args == null ? "" : args.trim();
+            lastToolArgs = raw;
+            follow();
         }
 
         void result(String text, boolean err) {
             String t = text == null ? "" : text.trim();
             if (t.length() > 4000) t = t.substring(0, 4000) + "\u2026";
-            if (lastToolDet == null) {            // \u7ed3\u679c\u5148\u5230\uff08\u5386\u53f2\u56de\u653e\uff09\u2192 \u81ea\u5df1\u843d\u4e00\u884c
-                TextView tx = line(err ? "\u2717" : "\u21B3", err ? Ui.RED : Ui.MUT, Ui.DIM);
-                tx.setText(t.length() == 0 ? "(\u7A7A)"
-                        : (t.length() > 300 ? t.substring(0, 300) + "\u2026" : t));
+            if (lastToolDet == null) {          // \u7ed3\u679c\u5148\u5230\uff08\u5386\u53f2\u56de\u653e\uff09\u2192 \u81ea\u5df1\u843d\u4e00\u884c
+                TextView tx = line(err ? "\u2717" : "\u21b3", err ? Ui.RED : Ui.MUT, Ui.DIM);
+                tx.setText(t.length() == 0 ? "(\u7a7a)" : (t.length() > 300 ? t.substring(0, 300) + "\u2026" : t));
+                follow();
                 return;
             }
             StringBuilder sb = new StringBuilder(lastToolArgs);
@@ -1514,14 +1582,19 @@ public class ChatView extends ScrollView {
                 if (sb.length() > 0) sb.append("\n\n");
                 sb.append(t);
             }
-            lastToolDet.setText(sb.length() == 0 ? "(\u7A7A)" : sb.toString());
+            lastToolDet.setText(sb.length() == 0 ? "(\u7a7a)" : sb.toString());
             if (err) lastToolDet.setTextColor(Ui.RED);
+            follow();
         }
 
+        /** \u6536\u5c3e\uff1a\u6807\u9898\u5b9a\u7a3f\uff0c\u6b63\u6587\u6298\u53e0\uff08\u6807\u9898\u5e38\u9a7b\uff0c\u70b9\u4e00\u4e0b\u8fd8\u80fd\u5c55\u5f00\uff09\u3002 */
         void finish() {
             if (done) return;
-            if (paraTv != null && paraBuf.length() > 0) paraTv.setText(paraBuf);   // \u7ed3\u675f\u540e\u6362\u5168\u6587
+            if (paraTv != null && paraBuf.length() > 0) paraTv.setText(paraBuf);
             done = true;
+            open = false;
+            body.setVisibility(View.GONE);
+            if (bodyWrap != null) bodyWrap.setVisibility(View.GONE);
             refresh();
         }
     }
