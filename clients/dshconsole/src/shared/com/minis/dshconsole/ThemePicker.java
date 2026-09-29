@@ -86,10 +86,17 @@ final class ThemePicker {
         });
         dlg.setOnShowListener(new android.content.DialogInterface.OnShowListener() {
             public void onShow(android.content.DialogInterface d) {
-                if (dlg.getWindow() != null) {
-                    dlg.getWindow().setBackgroundDrawable(
-                            new android.graphics.drawable.ColorDrawable(0x00000000));
-                }
+                android.view.Window w = dlg.getWindow();
+                if (w == null) return;
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+                // 关键：自定义视图的对话框必须自己定宽高，否则系统按面板默认撑满屏幕，
+                // 就出现"一张大灰卡里只有标题、下面全空"（用户截图）。
+                int width = (int) (act.getResources().getDisplayMetrics().widthPixels * 0.86f);
+                w.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+                // 留个日志：万一样式还是不对，我能直接读出实际尺寸，不用靠猜
+                android.util.Log.i("DshTheme", "外观弹层: width=" + width
+                        + " 屏幕宽=" + act.getResources().getDisplayMetrics().widthPixels
+                        + " 卡片子行数=" + card.getChildCount());
             }
         });
         dlg.show();
