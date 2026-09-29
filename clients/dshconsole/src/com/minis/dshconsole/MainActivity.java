@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         side = Ui.col(this);
-        side.setBackgroundColor(Ui.PANEL);
+        side.setBackgroundColor(Ui.BG);          // 抽屉跟消息区同色，白色的卡片才有层次
         side.setTranslationX(-sideW);
         FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(
                 sideW, FrameLayout.LayoutParams.MATCH_PARENT);
