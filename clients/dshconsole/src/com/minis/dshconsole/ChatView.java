@@ -238,7 +238,7 @@ public class ChatView extends ScrollView {
         spacer(Ui.S2);
         thinkRaw = "";
         thinkBox = Ui.col(ctx);
-        thinkBox.setBackground(Ui.surf(Ui.SURF2, Ui.R_CARD, ctx));
+        thinkBox.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, ctx));
         int pad = Ui.dp(ctx, Ui.PAD_CARD);
         thinkBox.setPadding(pad, Ui.dp(ctx, 10), pad, Ui.dp(ctx, 10));
 
@@ -360,7 +360,7 @@ public class ChatView extends ScrollView {
             toolGroupN = 0;
             toolGroupChars = 0;
             toolGroup = Ui.col(ctx);
-            toolGroup.setBackground(Ui.surf(Ui.TINT_TOOL, Ui.R_CARD, ctx));
+            toolGroup.setBackground(Ui.bg(Ui.TINT_TOOL, Ui.R_CARD, ctx));
             int pad = Ui.dp(ctx, Ui.PAD_CARD);
             toolGroup.setPadding(pad, Ui.dp(ctx, 9), pad, Ui.dp(ctx, 9));
             toolGroupHead = new TextView(ctx);
@@ -512,7 +512,7 @@ public class ChatView extends ScrollView {
         final int len = body.length();
 
         final LinearLayout card = Ui.col(ctx);
-        card.setBackground(Ui.surf(tint, Ui.R_CARD, ctx));
+        card.setBackground(Ui.bg(tint, Ui.R_CARD, ctx));
         int pad = Ui.dp(ctx, Ui.PAD_CARD);
         card.setPadding(pad, Ui.dp(ctx, 9), pad, Ui.dp(ctx, 9));
 
@@ -631,7 +631,7 @@ public class ChatView extends ScrollView {
         LinearLayout row = Ui.row(ctx);
         row.setGravity(android.view.Gravity.END);
         final TextView bubble = Ui.tv(ctx, text, Ui.FS_BODY, Ui.TEXT);
-        bubble.setBackground(Ui.surf(Ui.SURF3, Ui.R_BUBBLE, ctx));
+        bubble.setBackground(Ui.bg(Ui.SURF3, Ui.R_BUBBLE, ctx));
         int p = Ui.dp(ctx, 11);
         bubble.setPadding(p, p, p, p);
         final TextView enter = Ui.tv(ctx, "⏎", 16f, 0xFF0E1116);
@@ -1178,7 +1178,7 @@ public class ChatView extends ScrollView {
                 boolean sm = scrollSmooth;
                 scrollQueued = false;
                 scrollSmooth = false;
-                int y = Math.max(0, col.getHeight() - getHeight());
+                int y = Math.max(0, col.getHeight() + getPaddingTop() + getPaddingBottom() - getHeight());
                 ignoreScrollUntil = System.currentTimeMillis() + 150;   // 自己滚的，别当成用户操作
                 if (sm) {
                     smoothScrollTo(0, y);
@@ -1187,6 +1187,34 @@ public class ChatView extends ScrollView {
                 }
             }
         }, 40);
+    }
+
+    /**
+     * 无条件滚到真正的底部：布局结算后再补两枪。
+     * 回合结束/收尾用——不走节流、不看 following，避免"永远差一截"。
+     */
+    public void snapToBottom() {
+        following = true;
+        postDelayed(new Runnable() {
+            public void run() {
+                ignoreScrollUntil = System.currentTimeMillis() + 150;
+                scrollTo(0, bottomY());
+            }
+        }, 60);
+        postDelayed(new Runnable() {
+            public void run() {
+                int y = bottomY();
+                if (getScrollY() < y - 2) {          // 长文本/图片结算晚，差一点就再补
+                    ignoreScrollUntil = System.currentTimeMillis() + 150;
+                    scrollTo(0, y);
+                }
+            }
+        }, 320);
+    }
+
+    /** 内容真实底部：列高 + 上下内边距 − 视口高（少算 padding 就会差一截）。 */
+    private int bottomY() {
+        return Math.max(0, col.getHeight() + getPaddingTop() + getPaddingBottom() - getHeight());
     }
 
     /** 宽松版"贴近底部"：一屏之内都算跟随，否则内容一长滚动就悄悄停了。 */
