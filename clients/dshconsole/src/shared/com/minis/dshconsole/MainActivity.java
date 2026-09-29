@@ -54,12 +54,19 @@ public class MainActivity extends Activity {
                 | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);   // 回到前台不自动弹输入法（点输入框才弹）          // 先刷调色板，后面所有控件才拿得到对的颜色
         // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-        getWindow().setStatusBarColor(Ui.BG);      // 状态栏跟顶栏、消息区连成一片
-        getWindow().setNavigationBarColor(Ui.PANEL);
-        if (!Ui.DARK) {               // 亮色下状态栏图标要压黑，不然白字看不见
+        // 沉浸式：内容一直画到状态栏/导航栏底下，栏位颜色 = app 自己那一层（靠下面 inset 补内边距）
+        getWindow().setStatusBarColor(0x00000000);
+        getWindow().setNavigationBarColor(0x00000000);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
             getWindow().getDecorView().setSystemUiVisibility(
-                    android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | (Ui.DARK ? 0 : android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR));
         }
+        installInsets();            // 沉浸式 + 系统栏内边距 + 把 IME 高度转给聊天页做动画
         store = new Store(this);
         // 本地版：环境没装好/没跑起来，先把启用引导摆出来（远端版 hasRuntime() 为 false，永不进这里）
         final LocalEnv env = Cores.get().runtime();
@@ -186,6 +193,36 @@ public class MainActivity extends Activity {
             default: closeDsh(); connectDsh(true); break;
         }
         if (w != 1) closeDrawer();          // 动作做完收回抽屉；刷新留着看结果
+    }
+
+    /**
+     * 一套统一的 inset 处理（装在 content 容器上，避免和别处抢 decor 的监听）：
+     *   - 状态栏/导航栏内边距补给 root（配合透明栏 = 沉浸式）；
+     *   - IME 高度转给聊天页，由它做整页上抬动画（键盘起时不再叠一层导航栏内边距）。
+     */
+    private void installInsets() {
+        if (root == null) return;
+        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                int top = 0, bottom = 0, ime = 0;
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets bars = insets.getInsets(
+                            android.view.WindowInsets.Type.systemBars());
+                    top = bars.top;
+                    bottom = bars.bottom;
+                    ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                } else {
+                    top = insets.getSystemWindowInsetTop();
+                    bottom = insets.getSystemWindowInsetBottom();
+                }
+                v.setPadding(0, top, 0, ime > 0 ? 0 : bottom);      // 键盘起来时底部交给动画那层
+                if (tabChat instanceof TabChat) {
+                    ((TabChat) tabChat).onImeInset(ime);
+                }
+                return insets;
+            }
+        });
+        root.requestApplyInsets();
     }
 
     // ---------------- 抽屉 ----------------

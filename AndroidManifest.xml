@@ -14,7 +14,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustNothing"
             android:label="DSH 控制台"
             android:configChanges="0x4A0">
             <intent-filter>
