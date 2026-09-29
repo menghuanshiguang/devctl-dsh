@@ -15,7 +15,6 @@ import { homedir, hostname, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
 import { svg as qrSvg } from './qr.js'
 import { DEFAULT_WEB_PORT, installRemoteWeb } from './remote-web.js'
-import { settingsMethods } from './settings-methods.js'
 
 const VERSION = '1.2.1'
 const PROTOCOL = 1
@@ -223,7 +222,12 @@ export function apply(ctx, config) {
       warn,
     })
     if (!lanWeb) return () => {}
-    return () => lanWeb.dispose()
+    // 手机端从这里问「网页窗口在几号端口」，不用再猜。
+    bridge.web = lanWeb.info
+    return () => {
+      bridge.web = null
+      lanWeb.dispose()
+    }
   }, 'devctl-dsh.web-window')
 
   installSettingsRoutes(ctx, bridge)
@@ -326,6 +330,11 @@ async function serveLine(bridge, connection, line) {
         host: hostname(),
         platform: process.platform,
         time: Date.now(),
+        // 手机端（clients/dshconsole）的「设置」面板直接吃 DSH 自己的网页界面，
+        // 这里告诉它窗口在不在、在几号端口，省得客户端猜端口或探测。
+        web: bridge.web
+          ? { port: bridge.web.port ?? null, ready: !!bridge.web.ready, reason: bridge.web.reason ?? '' }
+          : null,
       },
     })
     return
@@ -361,11 +370,6 @@ async function serveLine(bridge, connection, line) {
 }
 
 async function dispatch(bridge, connection, method, params) {
-  // 手机端（clients/dshconsole）「设置」面板的三个方法，见 settings-methods.js。
-  // 放在最前面：它们不依赖 session，也不需要 sessionController。
-  const settingsHandler = settingsMethods[method]
-  if (settingsHandler) return await settingsHandler({ bridge, params, statusPayload: () => statusPayload(bridge) })
-
   const controller = bridge.ctx.sessionController
   if (!controller) throw new BridgeError('unavailable', 'sessionController is not composed in this Host')
 
@@ -622,6 +626,9 @@ function statusPayload(bridge) {
     uptimeMs: Date.now() - bridge.startedAt,
     peers,
     livePeers: peers.filter((peer) => peer.live).length,
+    web: bridge.web
+      ? { port: bridge.web.port ?? null, ready: !!bridge.web.ready, reason: bridge.web.reason ?? '', origin: bridge.web.origin ?? null }
+      : null,
   }
 }
 
