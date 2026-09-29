@@ -98,6 +98,8 @@ export function apply(ctx, config) {
   const stateFile = join(stateDir, STATE_NAME)
   const legacyStateFile = join(stateDir, LEGACY_STATE_NAME)
   const token = resolveToken(settings, stateFile, legacyStateFile)
+  // 本地模式（harness 就跑在这台手机上）：回环连接免令牌。默认关，patch 里显式打开。
+  const allowLocalNoAuth = settings.allowLocalNoAuth === true
 
   const connections = new Set()
   /**
@@ -126,6 +128,7 @@ export function apply(ctx, config) {
   const bridge = {
     ctx,
     token,
+    allowLocalNoAuth,
     stateFile,
     startedAt,
     connections,
@@ -153,6 +156,8 @@ export function apply(ctx, config) {
       connectedAt: Date.now(),
       lastSeenAt: Date.now(),
       peer: `${socket.remoteAddress ?? 'unknown'}:${socket.remotePort ?? 0}`,
+      // 回环连接（同一台手机上的客户端）在 allowLocalNoAuth 打开时免令牌
+      loopback: isLoopbackAddress(socket.remoteAddress),
       watches: new Map(),
       buffer: '',
       send(payload) {
@@ -325,9 +330,14 @@ async function serveLine(bridge, connection, line) {
 
   if (method === 'hello') {
     if (!bridge.isAuthenticated(params.token)) {
-      connection.send({ id, ok: false, error: { code: 'unauthorized', message: 'token rejected' } })
-      connection.dispose()
-      return
+      // 本地模式：harness 跑在同一台设备上，回环连接不必再拿令牌（显式开开关才生效）
+      if (!(bridge.allowLocalNoAuth === true && connection.loopback === true)) {
+        connection.send({ id, ok: false, error: { code: 'unauthorized', message: 'token rejected' } })
+        connection.dispose()
+        return
+      }
+      connection.localNoAuth = true
+      bridge.log?.(`loopback peer accepted without token: ${connection.peer}`)
     }
     connection.authenticated = true
     connection.client = typeof params.client === 'string' ? params.client : 'unknown'
@@ -344,6 +354,7 @@ async function serveLine(bridge, connection, line) {
         host: hostname(),
         platform: process.platform,
         time: Date.now(),
+        localNoAuth: bridge.allowLocalNoAuth === true,
         // 手机端（clients/dshconsole）的「设置」面板直接吃 DSH 自己的网页界面，
         // 这里告诉它窗口在不在、在几号端口，省得客户端猜端口或探测。
         web: webPayload(bridge),
@@ -749,6 +760,14 @@ function sendJson(response, status, payload) {
  * route only registers where that service exists; a Host composing the web
  * server without the connection carrier gets no settings page at all.
  */
+/** 回环地址判定：127.0.0.0/8、::1、以及 IPv4-mapped 的 ::ffff:127.x。 */
+function isLoopbackAddress(address) {
+  if (typeof address !== 'string' || address.length === 0) return false
+  const value = address.startsWith('::ffff:') ? address.slice(7) : address
+  if (value === '::1' || value === 'localhost') return true
+  return /^127\./.test(value)
+}
+
 /** Constant-time compare that never throws on a length mismatch. */
 function tokenMatches(offered, expected) {
   const left = Buffer.from(String(offered ?? ''), 'utf8')
