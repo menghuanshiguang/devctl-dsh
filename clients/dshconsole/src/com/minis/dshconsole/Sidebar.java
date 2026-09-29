@@ -670,7 +670,7 @@ public class Sidebar {
         final TextView t = Ui.tv(act, text, 15f, Ui.DIM);
         t.setGravity(Gravity.CENTER);
         t.setPadding(Ui.dp(act, 8), Ui.dp(act, 2), Ui.dp(act, 8), Ui.dp(act, 2));
-        t.setBackground(Ui.bg(Ui.PANEL2, 8, act));
+        Ui.press(t, act, 0x00000000, Ui.dp(act, 8));     // 同上：跟周围同底，不留灰药丸
         t.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 r.run();
