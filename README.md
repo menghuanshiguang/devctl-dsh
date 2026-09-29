@@ -246,6 +246,26 @@ JSON Lines over TCP，请求与响应按 `id` 配对，事件不请自来。
 
 方法：`ping`、`peers.list`、`sessions.list|create|prompt|cancel|rename|search|tail|watch|unwatch`、`workspaces.list|create|rename|delete`、`permissions.catalog|current|set`、`models.catalog|select`。
 
+手机端「设置」面板还用了三个方法（Host 侧实现在 [`settings-methods.js`](settings-methods.js)，契约见 [`clients/dshconsole/host-patch/settings-protocol.md`](clients/dshconsole/host-patch/settings-protocol.md)）：
+
+```jsonc
+// 侧边栏分区表
+{"id":3,"method":"settings.sections","params":{}}
+{"id":3,"ok":true,"result":{"sections":[{"id":"devctl","label":"devctl","order":50}]}}
+
+// 某个分区的正文：blocks 目前只有 kind:"card"（rows / btns / svg / badge 都可省）
+{"id":4,"method":"settings.panel","params":{"id":"devctl"}}
+{"id":4,"ok":true,"result":{"panel":{"title":"devctl","subtitle":"…","blocks":[{"kind":"card",
+  "title":"服务状态","rows":[{"k":"监听地址","v":"0.0.0.0:7788","badge":"运行中",
+  "btns":[{"label":"复制","action":"copy","arg":"192.168.1.9:7788"}]}],"svg":"<svg …/>"}]}}
+
+// 分区里的按钮
+{"id":5,"method":"settings.action","params":{"id":"devctl","action":"refresh","arg":""}}
+{"id":5,"ok":true,"result":{"message":"已刷新","reload":true}}
+```
+
+`settings.panel` / `settings.action` **不依赖会话**——手机端是一次性连接（连上、发一条、立刻 `close`），不会先 `create`。`copy` / `reveal-token` / `hide-token` 由客户端本地处理，Host 收不到；令牌默认脱敏，点「显示」走 `toggle-token`（Host 自己记状态，回 `reload:true` 让手机端重取面板）。未知分区返回说明卡而不是报错，所以手机端总能渲染出东西。自测：`node test-settings.mjs`。
+
 `workspaces.list` 是靠订阅 `workspaceController.follow` 拿首帧 baseline 实现的（Host 只暴露流式接口）；`permissions.set` 与 `permissions.current` 需要会话对象，被控端经 `sessionController.resolveAgent` 取，因此**对冷会话会触发一次 resume**——不带预设的 `permissions` 命令走投影，绕开这一点。
 
 `send` 的实现顺序是**先挂 watch 再 prompt**，两者之间到达的事件一条不丢，`turn/end` 用于判断本轮结束。

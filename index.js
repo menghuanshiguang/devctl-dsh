@@ -15,6 +15,7 @@ import { homedir, hostname, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
 import { svg as qrSvg } from './qr.js'
 import { DEFAULT_WEB_PORT, installRemoteWeb } from './remote-web.js'
+import { settingsMethods } from './settings-methods.js'
 
 const VERSION = '1.2.1'
 const PROTOCOL = 1
@@ -360,6 +361,11 @@ async function serveLine(bridge, connection, line) {
 }
 
 async function dispatch(bridge, connection, method, params) {
+  // 手机端（clients/dshconsole）「设置」面板的三个方法，见 settings-methods.js。
+  // 放在最前面：它们不依赖 session，也不需要 sessionController。
+  const settingsHandler = settingsMethods[method]
+  if (settingsHandler) return await settingsHandler({ bridge, params, statusPayload: () => statusPayload(bridge) })
+
   const controller = bridge.ctx.sessionController
   if (!controller) throw new BridgeError('unavailable', 'sessionController is not composed in this Host')
 
