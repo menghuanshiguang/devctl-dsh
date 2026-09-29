@@ -37,6 +37,9 @@ final class Runner {
 
     interface Out {
         void line(String text);
+
+        /** 原始块（保留 \r）：终端要靠它做"同一行刷新"的进度显示。 */
+        void chunk(String text);
     }
 
     private static Process current;
@@ -156,14 +159,14 @@ final class Runner {
                 if (ch == '\n') {
                     String t = line.toString();
                     line.setLength(0);
-                    if (out != null) out.line(t);
+                    Log.i(TAG, t);            // 整行只进 logcat；终端已收过原始块
                 } else {
                     line.append(ch);
                 }
             }
         }
         if (line.length() > 0) {
-            if (out != null) out.line(line.toString());
+            Log.i(TAG, line.toString());
         }
         log.close();
         current = null;
@@ -209,8 +212,9 @@ final class Runner {
         }
         cb.line("npm i @deepseek-ai/dsh@" + DSH_VERSION + "（几分钟）…");
         exec(c, "mkdir -p /opt/dsh && cd /opt/dsh && npm init -y >/dev/null 2>&1; "
-                + "npm i --no-audit --no-fund --ignore-scripts @deepseek-ai/dsh@" + DSH_VERSION
-                + " 2>&1 | tail -20", cb);
+                + "npm i --no-audit --no-fund --ignore-scripts --loglevel=http @deepseek-ai/dsh@" + DSH_VERSION
+                // 不加 tail：真终端就该看见 npm 一条条在干什么（--loglevel=http 让它有过程输出）
+                + "", cb);
         cb.line(harnessInstalled(c) ? "harness 装好了：node /opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"
                 : "装完但没找到入口，看上面的报错");
     }
@@ -259,6 +263,8 @@ final class Runner {
         FileOutputStream out = new FileOutputStream(dst);
         byte[] buf = new byte[64 * 1024];
         long total = 0;
+        long lastMb = -1;
+        long size = conn.getContentLength();
         int n;
         long last = 0;
         while ((n = in.read(buf)) > 0) {
@@ -266,7 +272,11 @@ final class Runner {
             total += n;
             if (System.currentTimeMillis() - last > 1000) {
                 last = System.currentTimeMillis();
-                cb.line("  … " + (total / 1048576) + "MB");
+                int mb = (int) (total / 1048576);
+                if (mb % 1 == 0 && mb != lastMb) {
+                    lastMb = mb;
+                    cb.line("  … " + mb + "MB" + (size > 0 ? "  " + (total * 100 / size) + "%" : ""));
+                }
             }
         }
         out.close();

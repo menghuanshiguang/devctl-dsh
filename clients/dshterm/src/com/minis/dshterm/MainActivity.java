@@ -65,7 +65,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 把一行输出送回网页（同时 Runner 已经写进 logcat）。 */
+    /** 整行 → 只进 logcat（命令行侧自测用，别在终端里重复一遍）。 */
+    private void pushLine(final String text) {
+        android.util.Log.i("DshTerm", text);
+    }
+
+    /** 把一段原始输出送回网页（含 \r：终端靠它做同行刷新）。 */
     private void push(final String text) {
         android.util.Log.i("DshTerm", text);        // 全部输出镜像到 logcat，命令行侧能自测
         ui.post(new Runnable() {
@@ -82,7 +87,12 @@ public class MainActivity extends Activity {
 
     private Runner.Out sink() {
         return new Runner.Out() {
-            public void line(String text) {
+            public void line(String text) {          // 我们自己的提示（下载进度、阶段…）
+                pushLine(text);
+                push(text + "\n");                   // 终端里也要看得见
+            }
+
+            public void chunk(String text) {
                 push(text);
             }
         };
