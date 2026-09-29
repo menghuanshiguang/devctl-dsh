@@ -21,43 +21,47 @@ import android.widget.TextView;
  */
 public class Ui {
 
-    // ─── 表面：三层，对齐 Minis 夜间主题（纯黑底 + 抬升的次级层）───
-    public static final int BG = 0xFF000000;      // 页面底（Minis background）
-    public static final int SURF = 0xFF26262A;    // 卡面 / 次级底（secondaryBg）
-    public static final int SURF2 = 0xFF2C2C30;   // 输入框（inputBg）
-    public static final int SURF3 = 0xFF3A3A3F;   // 工具块 / 按压态（toolBg）
+    // ─── 表面：三层，深/浅两套（applyTheme 里按系统模式赋值）───
+    public static int BG, SURF, SURF2, SURF3;
+    public static int STROKE, STROKE2, PRESS;
+    public static int TEXT, DIM, MUT;
+    public static int ACCENT, MINE, THEIRS, GREEN, RED, AMBER, VIOLET;
+    public static int CODE_BG, CODE_FG, ICODE_BG, ICODE_FG;
+    public static int TINT_TOOL, TINT_ERR, TINT_INJ;
+    public static int PANEL, PANEL2;                 // 兼容旧名
+    public static boolean DARK = true;               // 当前是否深色，亮色时状态栏图标要压黑
 
-    /** 发丝线：所有分隔都用它，别再用实心灰条。 */
-    public static final int STROKE = 0xFF38383A;  // 表格线 / 卡片边（tableBorder）
-    public static final int STROKE2 = 0x40545458;
-    public static final int PRESS = 0x1FFFFFFF;
-
-    // ─── 文字 ───
-    public static final int TEXT = 0xFFFFFFFF;    // primaryText
-    public static final int DIM = 0x99EBEBF5;     // secondaryText
-    public static final int MUT = 0x4DEBEBF5;     // tertiaryText
-
-    // ─── 语义色：一个用途一个色，不再混用 ───
-    public static final int ACCENT = 0xFF0A84FF;   // 选中 / 链接（Minis link·thinking 蓝）
-    public static final int MINE = 0xFF2F3A5C;     // 我方气泡（Minis 夜间 userBubble，暗蓝石板）
-    public static final int THEIRS = 0x00000000;   // 对方无气泡，直接铺底
-    public static final int GREEN = 0xFF30D158;    // 在线 / 成功
-    public static final int RED = 0xFFFF453A;      // 报错
-    public static final int AMBER = 0xFFFF9F0A;    // 工具调用 / 警告
-    public static final int VIOLET = 0xFFBF5AF2;   // 提示词注入
-
-    /** 代码：行内 chip 与整块代码（Minis inlineCode / codeBlock）。 */
-    public static final int CODE_BG = 0xFF262626, CODE_FG = 0xFF8CF38C;
-    public static final int ICODE_BG = 0xFF34343A, ICODE_FG = 0xFFFF9F0A;
-
-    /** 调色板渐变用的深色底（卡片内嵌块）。 */
-    public static final int TINT_TOOL = 0xFF26262A;
-    public static final int TINT_ERR = 0xFF2A1A1C;
-    public static final int TINT_INJ = 0xFF1E1A2A;
-
-    /** 兼容旧名（其它页还在用）。 */
-    public static final int PANEL = SURF;
-    public static final int PANEL2 = SURF2;
+    /**
+     * 按系统深/浅色刷一遍调色板。Activity 每次重建都会走这里，
+     * 所以 uiMode 变化交给系统重建 Activity 即可，视图里不用留任何监听。
+     */
+    public static void applyTheme(Context c) {
+        android.content.res.Configuration cf = c.getResources().getConfiguration();
+        DARK = (cf.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        if (DARK) {
+            BG = 0xFF000000; SURF = 0xFF26262A; SURF2 = 0xFF2C2C30; SURF3 = 0xFF3A3A3F;
+            STROKE = 0xFF38383A; STROKE2 = 0x40545458; PRESS = 0x1FFFFFFF;
+            TEXT = 0xFFFFFFFF; DIM = 0x99EBEBF5; MUT = 0x4DEBEBF5;
+            ACCENT = 0xFF0A84FF; MINE = 0xFF2F3A5C;
+            GREEN = 0xFF30D158; RED = 0xFFFF453A; AMBER = 0xFFFF9F0A; VIOLET = 0xFFBF5AF2;
+            CODE_BG = 0xFF262626; CODE_FG = 0xFF8CF38C;
+            ICODE_BG = 0xFF34343A; ICODE_FG = 0xFFFF9F0A;
+            TINT_TOOL = 0xFF26262A; TINT_ERR = 0xFF2A1A1C; TINT_INJ = 0xFF1E1A2A;
+        } else {
+            BG = 0xFFFFFFFF; SURF = 0xFFF2F2F7; SURF2 = 0xFFF2F2F7; SURF3 = 0xFFE5E5EA;
+            STROKE = 0xFFD8D8DC; STROKE2 = 0x1F000000; PRESS = 0x14000000;
+            TEXT = 0xFF000000; DIM = 0x99000000; MUT = 0x4D000000;
+            ACCENT = 0xFF007AFF; MINE = 0xFFD8E6FF;
+            GREEN = 0xFF248A3D; RED = 0xFFD70015; AMBER = 0xFFB25000; VIOLET = 0xFF8944AB;
+            CODE_BG = 0xFFF6F6F8; CODE_FG = 0xFF1B5E20;
+            ICODE_BG = 0xFFEDEDF2; ICODE_FG = 0xFF9A4B00;
+            TINT_TOOL = 0xFFF2F2F7; TINT_ERR = 0xFFFFEDEE; TINT_INJ = 0xFFF4EEFF;
+        }
+        THEIRS = 0x00000000;                         // 对方无气泡，直接铺底
+        PANEL = SURF;
+        PANEL2 = SURF2;
+    }
 
     // ─── 字级：对齐 Minis（正文 16sp / 单元格 14sp / 代码 13sp）───
     public static final float FS_TITLE = 16f;
