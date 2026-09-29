@@ -603,7 +603,11 @@ public class ChatView extends ScrollView {
             t.setGravity(Gravity.CENTER);
             col.addView(t, fullLp());
         }
-        scroll(jump);
+        if (jump && following) {
+            scroll(true);                         // 本来就贴在底部：钉死到底（收尾那一下）
+        } else {
+            scroll(false);                        // 用户翻上去在看东西：绝不抢位置
+        }
     }
 
     public void clear() {
@@ -1335,7 +1339,9 @@ public class ChatView extends ScrollView {
      * 回合结束/收尾用——不走节流、不看 following，避免"永远差一截"。
      */
     public void snapToBottom() {
-        following = true;
+        if (!following) {
+            return;                               // 用户翻上去在看（例如读思考过程）：绝不抢位置
+        }
         postDelayed(new Runnable() {
             public void run() {
                 ignoreScrollUntil = System.currentTimeMillis() + 150;
@@ -1574,7 +1580,10 @@ public class ChatView extends ScrollView {
                     open = !open;
                     body.setVisibility(open ? View.VISIBLE : View.GONE);
                     if (bodyWrap != null) bodyWrap.setVisibility(open ? View.VISIBLE : View.GONE);
-                    if (open && bodyWrap != null) bodyWrap.scrollTo(0, 0);   // 展开时从头上看起
+                    if (open) {
+                        setFollowing(false);          // 自己在看思考过程：别让流式把外层列表拽走
+                        jumpBody();                   // 再展开：回到思考内容最底部（最新流式输出）
+                    }
                     refresh();
                     toggleInPlace(head);
                 }
@@ -1602,10 +1611,27 @@ public class ChatView extends ScrollView {
             head.setText(s + (open ? "  \u25be" : "  \u25b8"));
         }
 
+        /** 展开大框时拉到底：看最新流式输出，而不是每次都从头重看。 */
+        void jumpBody() {
+            if (bodyWrap == null) return;
+            final android.widget.ScrollView sv = (android.widget.ScrollView) bodyWrap;
+            sv.post(new Runnable() {
+                public void run() {
+                    sv.fullScroll(View.FOCUS_DOWN);
+                }
+            });
+        }
+
         void follow() {
             if (scroll == null) return;
             final android.widget.ScrollView sv = (android.widget.ScrollView) scroll;
-            sv.post(new Runnable() { public void run() { sv.fullScroll(View.FOCUS_DOWN); } });
+            sv.post(new Runnable() {
+                public void run() {
+                    if (sv.getScrollY() + sv.getHeight() >= body.getHeight() - Ui.dp(ctx, 60)) {
+                        sv.fullScroll(View.FOCUS_DOWN);    // 用户自己翻上去看时，不硬拽回底部
+                    }
+                }
+            });
         }
 
         /** \u6b63\u6587\u884c\uff1a\u5de6 20dp \u653e\u5706\u70b9/\u56fe\u6807\uff08\u7ad6\u8f68\u4ece\u6b63\u4e2d\u7a7f\u8fc7\uff09\uff0c\u53f3\u8fb9\u662f\u6587\u5b57\u3002 */
