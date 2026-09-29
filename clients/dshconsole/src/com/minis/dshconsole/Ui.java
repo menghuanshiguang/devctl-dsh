@@ -179,7 +179,7 @@ public class Ui {
 
     /** 统一按压反馈：水波纹叠在底上，API21 以下退化为原底。 */
     public static void press(View v, Context c, int fill, int radiusDp) {
-        GradientDrawable base = surf(fill, radiusDp, c);
+        GradientDrawable base = bg(fill, radiusDp, c);      // 不要描边：全 app 的可点行都靠这里收口
         if (Build.VERSION.SDK_INT >= 21) {
             v.setBackground(new RippleDrawable(ColorStateList.valueOf(PRESS), base, null));
         } else {
