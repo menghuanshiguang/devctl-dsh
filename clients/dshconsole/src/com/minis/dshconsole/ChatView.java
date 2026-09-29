@@ -240,7 +240,7 @@ public class ChatView extends ScrollView {
                 + (open ? " \u25BE" : " \u25B8");
     }
 
-    public void thinkStart() {
+    private void legacyThinkStart() {
         if (thinkBox != null) return;
         dropEmpty();
         hasContent = true;
@@ -302,7 +302,7 @@ public class ChatView extends ScrollView {
     }
 
     /** 思考增量：默认折叠，只在标题下刷新最新一行；展开时只喂尾部一段，标题才够得着。 */
-    public void thinkAppend(String chunk) {
+    private void legacyThinkAppend(String chunk) {
         if (thinkBox == null) thinkStart();
         thinkRaw += chunk;
         if (thinkBody != null) thinkBody.setText(thinkShow());
@@ -327,7 +327,7 @@ public class ChatView extends ScrollView {
     }
 
     /** 思考结束：收起，只留一行「✦ 思考 · N 字 ▸」。 */
-    public void thinkEnd() {
+    private void legacyThinkEnd() {
         if (thinkBox == null) return;
         if (thinkHead != null && thinkHead.getTag() instanceof int[]) {
             int[] st = (int[]) thinkHead.getTag();
@@ -488,12 +488,12 @@ public class ChatView extends ScrollView {
     }
 
     /** 工具调用：折叠成一行，点标题才看完整参数。 */
-    public void tool(String name, String args) {
+    private void legacyTool(String name, String args) {
         fold("\u2699", name == null ? "?" : name, args, Ui.AMBER, Ui.TINT_TOOL, true);
     }
 
     /** 工具结果 / 报错。 */
-    public void toolResult(String text, boolean err) {
+    private void legacyToolResult(String text, boolean err) {
         fold(err ? "\u2717" : "\u21B3", err ? "工具报错" : "工具结果", text,
                 err ? Ui.RED : Ui.MUT, err ? Ui.TINT_ERR : Ui.TINT_TOOL, true);
     }
@@ -579,6 +579,15 @@ public class ChatView extends ScrollView {
 
     /** 回合边界用发丝分隔线；彩色提示走居中细字。 */
     public void note(String text, int color) {
+        note(text, color, true);
+    }
+
+    /** \u9759\u9ed8\u63d0\u793a\uff1a\u53ea\u5728\u672c\u6765\u5c31\u8d34\u5e95\u65f6\u624d\u8ddf\u7740\u6eda\uff0c\u7edd\u4e0d\u628a\u6b63\u5728\u7ffb\u5386\u53f2\u7684\u4eba\u62fd\u5230\u5e95\u90e8\uff08\u91cd\u8fde\u63d0\u793a\u7528\uff09 */
+    public void noteQuiet(String text, int color) {
+        note(text, color, false);
+    }
+
+    private void note(String text, int color, boolean jump) {
         dropEmpty();
         hasContent = true;
         spacer(Ui.S1);
@@ -592,7 +601,7 @@ public class ChatView extends ScrollView {
             t.setGravity(Gravity.CENTER);
             col.addView(t, fullLp());
         }
-        scroll(true);
+        scroll(jump);
     }
 
     public void clear() {
@@ -1254,4 +1263,267 @@ public class ChatView extends ScrollView {
         lp.gravity = android.view.Gravity.END;
         col.addView(v, lp);
     }
+    // \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 \u8f68\u8ff9\u65f6\u95f4\u7ebf\uff1a\u601d\u8003\u6bb5\u843d + \u5de5\u5177\u884c\u5408\u6210\u4e00\u6761\u7ad6\u8f68\uff08\u7167\u8c46\u5305\u90a3\u79cd\uff09 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    private Trace trace;
+    private int traceAnchor = -1;
+    private TextView lastToolDet;                 // \u6700\u540e\u4e00\u6761\u5de5\u5177\u884c\u7684\u8be6\u60c5\u6846\uff08\u7ed3\u679c\u56de\u6765\u65f6\u5f80\u91cc\u585e\uff09
+    private String lastToolArgs = "";
+
+    /** \u8f68\u8ff9\u8fd8\u5728\u539f\u4f4d\u5417\uff1f\u4e2d\u95f4\u63d2\u4e86\u6b63\u6587/\u65b0\u6d88\u606f\u5c31\u6536\u53e3\uff0c\u4e0b\u4e00\u6bb5\u601d\u8003\u518d\u5f00\u4e00\u6761\u3002 */
+    private Trace traceLive() {
+        if (trace != null && (col == null || col.getChildCount() - 1 != traceAnchor)) traceEnd();
+        return trace;
+    }
+
+    /** \u5f00\u4e00\u6761\u8f68\u8ff9\uff1a\u53ef\u6298\u53e0\u6807\u9898 + \u5e26\u7ad6\u8f68\u7684\u6b63\u6587\u533a\u3002 */
+    public void thinkStart() {
+        if (traceLive() != null) return;
+        dropEmpty();
+        hasContent = true;
+        spacer(Ui.S2);
+        trace = new Trace();
+        col.addView(trace.box, fullLp());
+        traceAnchor = col.getChildCount() - 1;
+    }
+
+    /** \u601d\u8003\u589e\u91cf\uff1a\u63a5\u5728\u5f53\u524d\u6bb5\u843d\u540e\u9762\uff1b\u4e0a\u4e00\u6761\u662f\u5de5\u5177\u884c\u5c31\u53e6\u8d77\u4e00\u6bb5\uff08\u8ddf\u8c46\u5305\u4e00\u6837\u5206\u6bb5\uff09\u3002 */
+    public void thinkAppend(String chunk) {
+        if (chunk == null || chunk.length() == 0) return;
+        thinkStart();
+        trace.para(chunk);
+        scroll(false);
+    }
+
+    /** \u601d\u8003\u7ed3\u675f\uff1a\u6807\u9898\u6362\u6210\u300c\u5df2\u601d\u8003\uff08\u7528\u65f6 N \u79d2\uff09\u300d\uff0c\u6b63\u6587\u7559\u5728\u539f\u5730\uff0c\u70b9\u6807\u9898\u8fd8\u80fd\u6536\u8d77\u6765\u3002 */
+    private void traceEnd() {
+        if (trace == null) return;
+        trace.finish();
+        trace = null;
+        traceAnchor = -1;
+    }
+
+    public void thinkEnd() {
+        if (trace == null) return;
+        traceEnd();
+        scroll(false);
+    }
+
+    /** \u5de5\u5177\u8c03\u7528\uff1a\u5728\u8f68\u8ff9\u91cc\u843d\u4e00\u884c\u300c\u56fe\u6807 + \u4e2d\u6587\u6458\u8981\u300d\uff0c\u70b9\u8fd9\u884c\u624d\u770b\u53c2\u6570/\u7ed3\u679c\u3002 */
+    public void tool(String name, String args) {
+        thinkStart();
+        trace.toolRow(name, args);
+        scroll(false);
+    }
+
+    /** \u5de5\u5177\u7ed3\u679c\uff1a\u585e\u8fdb\u4e0a\u4e00\u6761\u5de5\u5177\u884c\u7684\u8be6\u60c5\u91cc\uff1b\u6ca1\u6709\u5bf9\u5e94\u884c\uff08\u5386\u53f2\u56de\u653e\uff09\u5c31\u81ea\u5df1\u843d\u4e00\u884c\u3002 */
+    public void toolResult(String text, boolean err) {
+        if (traceLive() == null) thinkStart();
+        trace.result(text, err);
+        scroll(false);
+    }
+
+    /** \u5de5\u5177\u540d \u2192 \u5c0f\u56fe\u6807\u3002 */
+    private String toolGlyph(String name) {
+        String s = name == null ? "" : name.toLowerCase();
+        if (s.indexOf("search") >= 0 || s.indexOf("web") >= 0) return "\uD83D\uDD0D";
+        if (s.indexOf("fetch") >= 0 || s.indexOf("browse") >= 0 || s.indexOf("visit") >= 0
+                || s.indexOf("http") >= 0 || s.indexOf("open") >= 0) return "\uD83C\uDF10";
+        if (s.indexOf("read") >= 0 || s.indexOf("cat") >= 0) return "\uD83D\uDCC4";
+        if (s.indexOf("write") >= 0 || s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) return "\u270F\uFE0F";
+        if (s.indexOf("bash") >= 0 || s.indexOf("shell") >= 0 || s.indexOf("exec") >= 0) return "\uD83D\uDDA5\uFE0F";
+        if (s.indexOf("list") >= 0 || s.indexOf("ls") >= 0 || s.indexOf("glob") >= 0
+                || s.indexOf("find") >= 0) return "\uD83D\uDCC1";
+        if (s.indexOf("grep") >= 0 || s.indexOf("code") >= 0) return "\uD83D\uDD0E";
+        return "\u2699";
+    }
+
+    /** \u5de5\u5177\u540d + \u53c2\u6570 \u2192 \u300c\u641c\u7d22\u7f51\u9875 \u00b7 \u9a6c\u65af\u514b \u540c\u6027\u604b\u300d\u8fd9\u79cd\u4e2d\u6587\u6458\u8981\u3002 */
+    private String toolLabel(String name, String args) {
+        String s = name == null ? "" : name.toLowerCase();
+        String v;
+        if (s.indexOf("search") >= 0) v = "\u641C\u7D22\u7F51\u9875";
+        else if (s.indexOf("fetch") >= 0 || s.indexOf("browse") >= 0 || s.indexOf("visit") >= 0
+                || s.indexOf("http") >= 0 || s.indexOf("open") >= 0) v = "\u6D4F\u89C8\u7F51\u9875";
+        else if (s.indexOf("read") >= 0 || s.indexOf("cat") >= 0) v = "\u8BFB\u53D6\u6587\u4EF6";
+        else if (s.indexOf("write") >= 0 || s.indexOf("edit") >= 0 || s.indexOf("patch") >= 0) v = "\u5199\u5165\u6587\u4EF6";
+        else if (s.indexOf("bash") >= 0 || s.indexOf("shell") >= 0 || s.indexOf("exec") >= 0) v = "\u6267\u884C\u547D\u4EE4";
+        else if (s.indexOf("list") >= 0 || s.indexOf("ls") >= 0 || s.indexOf("glob") >= 0
+                || s.indexOf("find") >= 0) v = "\u67E5\u770B\u76EE\u5F55";
+        else if (s.indexOf("grep") >= 0) v = "\u68C0\u7D22\u5185\u5BB9";
+        else v = "\u8C03\u7528\u5DE5\u5177";
+        String extra = pickArg(args, "query");
+        if (extra.length() == 0) extra = pickArg(args, "path");
+        if (extra.length() == 0) extra = pickArg(args, "command");
+        if (extra.length() == 0) extra = name == null ? "" : name;
+        if (extra.length() > 34) extra = extra.substring(0, 34) + "\u2026";
+        return v + (extra.length() == 0 ? "" : " \u00B7 " + extra);
+    }
+
+    /** \u4ece\u5de5\u5177\u53c2\u6570 JSON \u91cc\u62a0\u4e00\u4e2a\u5b57\u7b26\u4e32\u5b57\u6bb5\u3002 */
+    private String pickArg(String args, String key) {
+        if (args == null || args.length() == 0) return "";
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"" + key + "\"\\s*:\\s*\"([^\"]{0,140})\"").matcher(args);
+        return m.find() ? m.group(1) : "";
+    }
+
+    /** \u4e00\u6761\u8f68\u8ff9\uff1a\u53ef\u6298\u53e0\u6807\u9898 + \u7ad6\u8f68\u6b63\u6587\uff08\u601d\u8003\u6bb5\u843d / \u5de5\u5177\u884c\u6df7\u6392\uff09\u3002 */
+    private class Trace {
+        final LinearLayout box = Ui.col(ctx);
+        final LinearLayout body = Ui.col(ctx);
+        final TextView head = new TextView(ctx);
+        final StringBuilder paraBuf = new StringBuilder();
+        final long at = System.currentTimeMillis();
+        int tools, paras;
+        boolean done, open = true, lastTool;
+        TextView paraTv;
+
+        Trace() {
+            head.setTextSize(Ui.FS_SMALL);
+            head.setTextColor(Ui.MUT);
+            head.setTypeface(Typeface.MONOSPACE);
+            head.setSingleLine(true);
+            head.setPadding(0, Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3));
+            body.setBackground(new Ui.Rail(Ui.STROKE, Ui.dp(ctx, 9), Ui.dp(ctx, 2),
+                    Ui.dp(ctx, 10), Ui.dp(ctx, 12)));
+            head.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    open = !open;
+                    body.setVisibility(open ? View.VISIBLE : View.GONE);
+                    refresh();
+                    toggleInPlace(box);
+                }
+            });
+            Ui.press(head, ctx, 0x00000000, Ui.R_CHIP);
+            box.addView(head, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            box.addView(body, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            refresh();
+        }
+
+        /** \u6807\u9898\uff1a\u6d41\u5f0f\u671f\u95f4\u300c\u601d\u8003\u4e2d\u2026\u300d\uff0c\u7ed3\u675f\u540e\u300c\u5df2\u601d\u8003\uff08\u7528\u65f6 N \u79d2\uff09\u300d\uff1b\u53ea\u6709\u5de5\u5177\u65f6\u6309\u6761\u6570\u3002 */
+        void refresh() {
+            String s;
+            if (!done) s = paras > 0 ? "\u601D\u8003\u4E2D\u2026" : "\u8C03\u7528\u5DE5\u5177\u4E2D\u2026";
+            else if (paras > 0) s = "\u5DF2\u601D\u8003\uFF08\u7528\u65F6 "
+                    + (int) Math.max(1, (System.currentTimeMillis() - at + 999) / 1000) + " \u79D2\uFF09";
+            else s = "\u5DE5\u5177\u8C03\u7528 \u00D7" + tools;
+            head.setText(s + (open ? "  \u25BE" : "  \u25B8"));
+        }
+
+        /** \u6b63\u6587\u884c\uff1a\u5de6\u8fb9 20dp \u653e\u5706\u70b9/\u56fe\u6807\uff08\u7ad6\u8f68\u4ece\u6b63\u4e2d\u7a7f\u8fc7\uff09\uff0c\u53f3\u8fb9\u662f\u6587\u5b57\u3002 */
+        TextView line(String mark, int markColor, int textColor) {
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            TextView mk = new TextView(ctx);
+            mk.setText(mark);
+            mk.setTextSize(Ui.FS_SMALL);
+            mk.setTextColor(markColor);
+            mk.setTypeface(Typeface.MONOSPACE);
+            mk.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            row.addView(mk, new LinearLayout.LayoutParams(Ui.dp(ctx, 20),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            TextView tx = new TextView(ctx);
+            tx.setTextSize(Ui.FS_SMALL);
+            tx.setTextColor(textColor);
+            tx.setLineSpacing(Ui.dp(ctx, 4), 1f);
+            row.addView(tx, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(ctx, 6);
+            body.addView(row, lp);
+            return tx;
+        }
+
+        void para(String chunk) {
+            if (paraTv == null || lastTool) {
+                paraTv = line("\u2022", Ui.STROKE, Ui.DIM);
+                paraBuf.setLength(0);
+                paras++;
+                lastTool = false;
+                refresh();                    // \u53ea\u5728\u8d77\u65b0\u6bb5\u65f6\u5237\u6807\u9898\uff1a\u6d41\u5f0f\u671f\u95f4\u522b\u6bcf\u5e27 setText
+            }
+            paraBuf.append(chunk);
+            paraTv.setText(paraBuf.length() > 2600
+                    ? "\u2026" + paraBuf.substring(paraBuf.length() - 2600) : paraBuf);
+        }
+
+        void toolRow(String name, String args) {
+            tools++;
+            lastTool = true;
+            paraTv = null;
+            refresh();
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            TextView mk = new TextView(ctx);
+            mk.setText(toolGlyph(name));
+            mk.setTextSize(Ui.FS_SMALL);
+            mk.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            row.addView(mk, new LinearLayout.LayoutParams(Ui.dp(ctx, 20),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            TextView tx = new TextView(ctx);
+            tx.setText(toolLabel(name, args));
+            tx.setTextSize(Ui.FS_SMALL);
+            tx.setTextColor(Ui.TEXT);
+            row.addView(tx, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            final LinearLayout item = Ui.col(ctx);
+            item.addView(row, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            final TextView det = new TextView(ctx);
+            det.setTextSize(Ui.FS_SMALL);
+            det.setTextColor(Ui.DIM);
+            det.setTypeface(Typeface.MONOSPACE);
+            det.setBackground(Ui.bg(Ui.SURF2, 10, ctx));
+            det.setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 8), Ui.dp(ctx, 10), Ui.dp(ctx, 8));
+            det.setVisibility(View.GONE);
+            det.setText(args == null || args.trim().length() == 0 ? "(\u65E0\u53C2\u6570)" : args.trim());
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            dlp.leftMargin = Ui.dp(ctx, 20);
+            dlp.topMargin = Ui.dp(ctx, 6);
+            item.addView(det, dlp);
+            item.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    det.setVisibility(det.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                    toggleInPlace(item);
+                }
+            });
+            Ui.press(item, ctx, 0x00000000, Ui.R_CHIP);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(ctx, 6);
+            body.addView(item, lp);
+            lastToolDet = det;
+            lastToolArgs = args == null ? "" : args.trim();
+        }
+
+        void result(String text, boolean err) {
+            String t = text == null ? "" : text.trim();
+            if (t.length() > 4000) t = t.substring(0, 4000) + "\u2026";
+            if (lastToolDet == null) {            // \u7ed3\u679c\u5148\u5230\uff08\u5386\u53f2\u56de\u653e\uff09\u2192 \u81ea\u5df1\u843d\u4e00\u884c
+                TextView tx = line(err ? "\u2717" : "\u21B3", err ? Ui.RED : Ui.MUT, Ui.DIM);
+                tx.setText(t.length() == 0 ? "(\u7A7A)"
+                        : (t.length() > 300 ? t.substring(0, 300) + "\u2026" : t));
+                return;
+            }
+            StringBuilder sb = new StringBuilder(lastToolArgs);
+            if (t.length() > 0) {
+                if (sb.length() > 0) sb.append("\n\n");
+                sb.append(t);
+            }
+            lastToolDet.setText(sb.length() == 0 ? "(\u7A7A)" : sb.toString());
+            if (err) lastToolDet.setTextColor(Ui.RED);
+        }
+
+        void finish() {
+            if (done) return;
+            if (paraTv != null && paraBuf.length() > 0) paraTv.setText(paraBuf);   // \u7ed3\u675f\u540e\u6362\u5168\u6587
+            done = true;
+            refresh();
+        }
+    }
+
 }
