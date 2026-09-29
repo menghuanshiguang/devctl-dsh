@@ -96,14 +96,12 @@ public class TabChat extends Tab {
         box.addView(cvWrap, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        box.addView(modeStrip(), mlp);
+        View modeRow = modeStrip();                  // 模式栏搬进输入卡片内部（DeepSeek 式）
 
         LinearLayout bar = Ui.row(act);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackgroundColor(Ui.PANEL);
-        int p = Ui.dp(act, 8);
+        bar.setBackgroundColor(0x00000000);          // 底色交给外层圆角卡片
+        int p = Ui.dp(act, 2);
         bar.setPadding(p, p, p, p);
 
         input = new EditText(act);
@@ -114,7 +112,7 @@ public class TabChat extends Tab {
         input.setSingleLine(false);
         input.setMaxLines(5);
         input.setImeOptions(EditorInfo.IME_FLAG_NO_ENTER_ACTION);
-        input.setBackground(Ui.bg(Ui.PANEL2, 20, act));
+        input.setBackgroundColor(0x00000000);        // 输入框融进卡片，不再单独一块圆角
         int ip = Ui.dp(act, 12);
         input.setPadding(ip, Ui.dp(act, 9), ip, Ui.dp(act, 9));
         LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(0,
@@ -137,7 +135,22 @@ public class TabChat extends Tab {
             }
         });
         bar.addView(sendBtn);
-        box.addView(bar);
+
+        LinearLayout card = new LinearLayout(act);   // DeepSeek 式：整块独立圆角卡片
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(Ui.bg(Ui.SURF2, 22, act));
+        int cp = Ui.dp(act, 6);
+        card.setPadding(cp, cp, cp, cp);
+        card.addView(modeRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        card.addView(bar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout outer = new LinearLayout(act);  // 卡片四周留白，浮在背景上
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(Ui.dp(act, 10), Ui.dp(act, 6), Ui.dp(act, 10), Ui.dp(act, 10));
+        outer.addView(card);
+        box.addView(outer);
         return box;
     }
 
