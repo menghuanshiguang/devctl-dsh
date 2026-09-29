@@ -124,6 +124,33 @@ function rawHeader(rawHeaders, name) {
   return ''
 }
 
+/**
+ * One forwarded header value, rewritten the way the Host web server would have
+ * seen it if the request had come from its own loopback browser.
+ *
+ * The DSH web server rejects requests that look cross-origin (`403 forbidden`),
+ * and a viewer on the LAN *always* looks cross-origin to it: its `Origin` is
+ * `http://<lan-ip>:7790` while the server believes it lives on 127.0.0.1. The
+ * page's own fetches and websockets therefore come back 403 and the settings
+ * sections render "transport failure … HTTP 403". Rewriting the three
+ * provenance headers keeps the server's same-origin guard satisfied without
+ * loosening anything on the phone side.
+ */
+function asLocalHeader(name, value, base) {
+  if (name === 'host') return base.host
+  if (name === 'origin') return base.origin
+  if (name === 'referer') {
+    try {
+      const ref = new URL(value)
+      return `${base.origin}${ref.pathname}${ref.search}`
+    } catch {
+      return `${base.origin}/`
+    }
+  }
+  if (name === 'sec-fetch-site' && value !== 'none') return 'same-origin'
+  return value
+}
+
 /** Where the caller's devctl token came from, if anywhere. */
 function tokenFrom(request) {
   const raw = request.url ?? '/'
@@ -309,6 +336,9 @@ export function installRemoteWeb({
       for (const key of Object.keys(headers)) {
         if (HOP_BY_HOP.has(key.toLowerCase())) delete headers[key]
       }
+      for (const key of Object.keys(headers)) {
+        headers[key] = asLocalHeader(key.toLowerCase(), headers[key], base)
+      }
       const upstream = httpRequest(
         { host: base.hostname, port: base.port || 80, method: request.method, path: request.url, headers },
         (up) => {
@@ -351,7 +381,9 @@ export function installRemoteWeb({
       const upstream = tcpConnect(Number(base.port || 80), base.hostname, () => {
         let head_text = `${request.method} ${request.url} HTTP/1.1\r\n`
         for (let i = 0; i < request.rawHeaders.length; i += 2) {
-          head_text += `${request.rawHeaders[i]}: ${request.rawHeaders[i + 1]}\r\n`
+          const name = String(request.rawHeaders[i])
+          const value = asLocalHeader(name.toLowerCase(), String(request.rawHeaders[i + 1] ?? ''), base)
+          head_text += `${name}: ${value}\r\n`
         }
         head_text += '\r\n'
         upstream.write(head_text)

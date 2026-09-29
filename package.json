@@ -1,6 +1,6 @@
 {
   "name": "devctl-dsh",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "Drive a DSH instance from another device over a token-authenticated TCP control port - the DSH half of the devctl family.",
   "keywords": [

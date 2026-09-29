@@ -92,13 +92,14 @@ DSH 设置里会多出一个 **devctl** 分区（在「Agent 预设」和「规�
 ```
 
 - 第一次带 `?token=` 进来会种一个 HttpOnly cookie 并 302 抹掉查询串，之后的静态资源和 WebSocket 都跟着走
+- **来源头要改写**：Host web 服务器拒收看着跨源的请求（`403 forbidden`），而手机页面天生就跨源（`Origin` 是 `http://<局域网IP>:7790`，服务器却以为自己在 127.0.0.1）。所以转发时把 `Origin` / `Referer` / `Sec-Fetch-Site` 一律改写成「本机同源」，HTTP 和 WebSocket 握手两条路都要改——不改的话设置页各分区会显示 `transport failure … HTTP 403`，实时连接也会被踢
 - 目标端口不用配：插件先问 Host 自己要（`webServer` 服务就在同一个进程里，直接读它的端口），读不到才拿自己的 `/devctl-dsh/status` 去探 loopback
 - **探测请求带令牌**：`/devctl-dsh/status` 坐在 Host 的浏览器信任检查后面，裸探测永远会被 401 挡掉，所以探针带 `?probe=<控制令牌>`，插件这一侧对得上就放行
 - `GET /__devctl-web/health?token=…` 返回 `{ok, port, origin, reason, url, seen, addresses}`；`seen` 列出所有应答过 HTTP 的 loopback 端口（401/404 也算），探不到时用它说明原因
 - 协议里的 `web` 块（`hello` / `status` 都会带）：`{port, ready, reason, target, url, source, seen}`。
   `ready` 为真时控制端直接开 `url`（已含令牌），不用自己拼端口；`source` 说明这个地址是哪来的（`host` 服务直读 / `config` 配置 / `discovered` 探测）
 - 配置：`web.port`（默认 7790，**设 0 关闭**）、`web.target`（钉死本机网页地址，比如 `http://127.0.0.1:3081`）
-- 自测：`node test-remote-web.mjs`（假一个 Host web 服务器，跑通发现 / 鉴权 / 跳转 / 透传）
+- 自测：`node test-remote-web.mjs`（假一个 Host web 服务器 + 同源守卫，跑通发现 / 鉴权 / 跳转 / 透传 / 来源头改写）
 
 意义在于**兼容性**：设置页是 Web 客户端，每个插件都通过 client bundle 注册自己的分区，所以手机要看全，只能加载这个页面本身，而不是给每个插件再写一遍面板。
 
