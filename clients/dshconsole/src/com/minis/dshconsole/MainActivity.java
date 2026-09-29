@@ -141,7 +141,7 @@ public class MainActivity extends Activity {
         TextView t = Ui.tv(this, text, 17f, Ui.TEXT);
         t.setGravity(Gravity.CENTER);
         t.setPadding(Ui.dp(this, 9), Ui.dp(this, 5), Ui.dp(this, 9), Ui.dp(this, 5));
-        t.setBackground(Ui.bg(Ui.PANEL2, 9, this));
+        Ui.press(t, this, 0x00000000, Ui.dp(this, 9));   // 融进顶栏：平时无底，只有按压反馈
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = Ui.dp(this, 4);
