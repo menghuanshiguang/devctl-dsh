@@ -1351,6 +1351,74 @@ public class TabChat extends Tab {
     /** 运行期噪音（step/session-log/queue…）：这些不是对话，别往屏幕上摆。 */
     private final java.util.HashSet<String> toolNames = new java.util.HashSet<String>();
 
+    /**
+     * 会话事件的渲染。以前这里只对"不含 / 的事件名"打个灰点，于是 harness 那些
+     * 命名空间事件（llm/retry、compaction/*、command/*、approval/*…）**全被静默丢掉** ✗
+     * 现在按 harness 的会话事件表一类一类说清楚。
+     */
+    private void renderEvent(String ty, JSONObject r) {
+        if (ty == null || ty.length() == 0) return;
+        if (toolNames.contains(ty)) return;                       // 工具名已经在卡片里了
+        String extra = evSum(r);
+        if (ty.startsWith("llm/retry")) {                          // 模型重试：harness 会插一行
+            cv.note("\u27F3 模型重试" + (extra.length() > 0 ? " · " + extra : ""), Ui.AMBER);
+            return;
+        }
+        if (ty.startsWith("compaction/start")) {
+            cv.note("\u25A4 正在压缩上下文…", Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("compaction/summary")) {
+            cv.note("\u25A4 上下文已压缩（写入摘要）" + (extra.length() > 0 ? " · " + extra : ""), Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("compaction/end")) {
+            cv.note("\u25A4 压缩结束", Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("compaction/prune")) {
+            cv.note("\u25A4 清理历史", Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("command/run")) {
+            cv.note("\u276F 命令 " + extra, Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("command/done")) {
+            cv.note("\u2713 命令完成", Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("approval/asked")) {                     // 需要用户拍板（交互还差按钮）
+            cv.note("\u26A0 需要你确认" + (extra.length() > 0 ? " · " + extra : ""), Ui.AMBER);
+            return;
+        }
+        if (ty.startsWith("approval/decided")) {
+            cv.note("\u00B7 审批已处理" + (extra.length() > 0 ? " · " + extra : ""), Ui.DIM);
+            return;
+        }
+        if (ty.startsWith("request/context") || ty.startsWith("system/message")
+                || ty.startsWith("developer/message")) {           // 注入的上下文：折叠，不占屏
+            if (extra.length() > 0) cv.inject(DshConsole.clamp(extra, 4000));
+            return;
+        }
+        if (ty.startsWith("deliverables/presented")) {
+            cv.note("\uD83D\uDCE6 交付物" + (extra.length() > 0 ? " · " + extra : ""), Ui.DIM);
+            return;
+        }
+        if (noise(ty)) return;
+        if (ty.indexOf('/') < 0) cv.note("\u00B7 " + ty, Ui.DIM);
+    }
+
+    /** 事件里能给用户看的一点点信息（有 text/reason/attempt/name 就取）。 */
+    private static String evSum(JSONObject r) {
+        String[] keys = {"text", "reason", "message", "name", "command", "query", "attempt", "model"};
+        for (int i = 0; i < keys.length; i++) {
+            String v = r.optString(keys[i], "");
+            if (v.length() > 0) return DshConsole.clamp(v.replace('\n', ' '), 80);
+        }
+        return "";
+    }
+
     private static boolean noise(String ty) {
         if (ty == null) {
             return true;
@@ -1493,11 +1561,7 @@ public class TabChat extends Tab {
                 cv.images(tim, false);                      // 工具产出的图（read_image / 截图）挂在它下面
             }
         } else if ("event".equals(kind)) {
-            String ty = r.optString("type", "");
-            if (ty.length() > 0 && !noise(ty) && !toolNames.contains(ty)
-                    && ty.indexOf('/') < 0) {                        // 工具名不再重复提示：卡片里已经有了
-                cv.note("· " + ty, Ui.DIM);
-            }
+            renderEvent(r.optString("type", ""), r);
         } else if ("turn-start".equals(kind)) {
             cv.note("▷ 回合 " + r.optLong("turn", 0), Ui.DIM);
         } else if ("turn-end".equals(kind)) {

@@ -1391,9 +1391,51 @@ function describeEvent(event) {
       return { kind: 'turn-start', seq, turn: data.turn }
     case 'turn/end':
       return { kind: 'turn-end', seq, turn: data.turn, reason: turnReason(data.reason) }
-    default:
-      return { kind: 'event', seq, type: event?.type }
+    default: {
+      // 以前这里只回一个事件名，手机端能看到"发生过什么"却看不到"发生了什么"。
+      // 按会话事件族挑几件可显示的小字段带上（不含大正文，正文类事件另行截断）。
+      return { kind: 'event', seq, type: event?.type, ...eventInfo(event?.type, data) }
+    }
   }
+}
+
+/** 事件族 → 手机端要的少量可显示字段。只挑小字段，绝不整包转发。 */
+function eventInfo(type, data) {
+  if (typeof type !== 'string' || type.length === 0) return {}
+  const d = data !== null && typeof data === 'object' ? data : {}
+  const line = (value, limit = 120) => truncate(String(value ?? '').replace(/\s+/g, ' ').trim(), limit)
+  if (type.startsWith('llm/retry')) {
+    return {
+      reason: line(d.reason?.message ?? d.error?.message ?? d.reason ?? ''),
+      attempt: Number.isFinite(d.attempt) ? d.attempt : undefined,
+      model: line(d.model ?? ''),
+    }
+  }
+  if (type.startsWith('compaction/')) {
+    return {
+      reason: line(d.summary ?? d.error?.message ?? ''),
+      tokens: Number.isFinite(d.shadowedTokenCount) ? d.shadowedTokenCount : undefined,
+    }
+  }
+  if (type.startsWith('command/')) {
+    return {
+      command: line(d.command ?? d.name ?? d.commandName ?? ''),
+      text: line(d.reason?.message ?? d.error?.message ?? d.status ?? ''),
+    }
+  }
+  if (type.startsWith('approval/')) {
+    return {
+      name: line(d.toolName ?? d.name ?? d.request?.toolName ?? ''),
+      text: line(d.reason ?? d.message ?? d.request?.reason ?? d.decision ?? ''),
+    }
+  }
+  if (type.startsWith('deliverables/')) {
+    return { name: Array.isArray(d.items) ? `${d.items.length} 项` : line(d.title ?? d.name ?? '') }
+  }
+  if (type.startsWith('request/context') || type.startsWith('system/message') || type.startsWith('developer/message')) {
+    return { text: truncate(textOf(d.message?.content ?? d.content ?? d.text), CONTEXT_TEXT_CHARS) }
+  }
+  return {}
 }
 
 function textOf(content) {
