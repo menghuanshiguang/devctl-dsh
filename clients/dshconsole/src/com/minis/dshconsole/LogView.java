@@ -24,10 +24,10 @@ public class LogView extends ScrollView {
         tv.setTextIsSelectable(true);
         tv.setLineSpacing(Ui.dp(c, 2), 1f);
         tv.setPadding(Ui.dp(c, 8), Ui.dp(c, 8), Ui.dp(c, 8), Ui.dp(c, 8));
-        tv.setBackground(Ui.bg(0xFF0B0E13, 10, c));
+        tv.setBackground(Ui.bg(Ui.BG, 10, c));
         tv.setGravity(Gravity.START);
         addView(tv, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        setBackground(Ui.bg(0xFF0B0E13, 10, c));
+        setBackground(Ui.bg(Ui.BG, 10, c));
     }
 
     public void setMinHeightDp(int dp) {

@@ -46,10 +46,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Ui.applyTheme(this);          // 先刷调色板，后面所有控件才拿得到对的颜色
         // 用自绘顶栏：去掉系统 ActionBar（重复标题栏 + 多占 56dp）
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         getWindow().setStatusBarColor(Ui.PANEL);
         getWindow().setNavigationBarColor(Ui.PANEL);
+        if (!Ui.DARK) {               // 亮色下状态栏图标要压黑，不然白字看不见
+            getWindow().getDecorView().setSystemUiVisibility(
+                    android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
         store = new Store(this);
         List<Store.Dev> list = store.devices("dsh");
         if (list.isEmpty()) {
