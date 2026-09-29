@@ -26,7 +26,7 @@ public class Ui {
     public static int STROKE, STROKE2, PRESS;
     public static int TEXT, DIM, MUT;
     public static int ACCENT, MINE, THEIRS, GREEN, RED, AMBER, VIOLET;
-    public static int CODE_BG, CODE_FG, ICODE_BG, ICODE_FG;
+    public static int CODE_BG, CODE_FG, ICODE_BG, ICODE_FG, ICODE_BD;
     public static int TINT_TOOL, TINT_ERR, TINT_INJ, TINT_WARN, TINT_INFO;
     public static int PANEL, PANEL2;                 // 兼容旧名
     public static int CARD, CHIP_BG, CHIP_BD;        // 输入卡片底 / 胶囊底 / 胶囊描边
@@ -97,7 +97,8 @@ public class Ui {
             ACCENT = 0xFF0A84FF; MINE = 0xFF2F3A5C;
             GREEN = 0xFF30D158; RED = 0xFFFF453A; AMBER = 0xFFFF9F0A; VIOLET = 0xFFBF5AF2;
             CODE_BG = 0xFF262626; CODE_FG = 0xFF8CF38C;
-            ICODE_BG = 0xFF34343A; ICODE_FG = 0xFFFF9F0A;
+            ICODE_BG = 0xFF2C2C32; ICODE_FG = 0xFFFF9F0A;
+            ICODE_BD = 0x24FFFFFF;
             TINT_TOOL = 0xFF26262A; TINT_ERR = 0xFF2A1A1C; TINT_INJ = 0xFF1E1A2A;
             TINT_WARN = 0xFF2A2318; TINT_INFO = 0xFF16222E;
         } else {
@@ -107,7 +108,8 @@ public class Ui {
             ACCENT = 0xFF007AFF; MINE = 0xFFD8E6FF;
             GREEN = 0xFF248A3D; RED = 0xFFD70015; AMBER = 0xFFB25000; VIOLET = 0xFF8944AB;
             CODE_BG = 0xFFF6F6F8; CODE_FG = 0xFF1B5E20;
-            ICODE_BG = 0xFFEDEDF2; ICODE_FG = 0xFF9A4B00;
+            ICODE_BG = 0xFFF0F0F4; ICODE_FG = 0xFF9A4B00;
+            ICODE_BD = 0x14000000;
             TINT_TOOL = 0xFFF2F2F7; TINT_ERR = 0xFFFFEDEE; TINT_INJ = 0xFFF4EEFF;
             TINT_WARN = 0xFFFFF6E5; TINT_INFO = 0xFFEAF3FF;
         }

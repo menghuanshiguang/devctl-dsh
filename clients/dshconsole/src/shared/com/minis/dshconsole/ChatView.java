@@ -766,6 +766,44 @@ public class ChatView extends ScrollView {
         snapToBottom();
     }
 
+    /**
+     * 行内代码的小底：圆角 + 细描边（照 harness 的 radius-sm + border-l1）。
+     * BackgroundColorSpan 只能画直角矩形，那种硬方块贴在深色正文里特别扎眼，所以自己画。
+     */
+    static class RoundBg extends android.text.style.ReplacementSpan {
+        private final int bg;
+        private final int border;
+        private final int radius;
+        private final int padX;
+
+        RoundBg(int bg, int border, int radius, int padX) {
+            this.bg = bg;
+            this.border = border;
+            this.radius = radius;
+            this.padX = padX;
+        }
+
+        public int getSize(android.graphics.Paint paint, CharSequence text, int start, int end,
+                           android.graphics.Paint.FontMetricsInt fm) {
+            return (int) Math.ceil(paint.measureText(text, start, end)) + padX * 2;
+        }
+
+        public void draw(android.graphics.Canvas canvas, CharSequence text, int start, int end,
+                         float x, int top, int y, int bottom, android.graphics.Paint paint) {
+            float w = paint.measureText(text, start, end);
+            android.graphics.Paint p = new android.graphics.Paint();
+            p.setAntiAlias(true);
+            p.setColor(bg);
+            android.graphics.RectF r = new android.graphics.RectF(x, top + 1, x + w + padX * 2, bottom - 1);
+            canvas.drawRoundRect(r, radius, radius, p);
+            p.setStyle(android.graphics.Paint.Style.STROKE);
+            p.setStrokeWidth(1f);
+            p.setColor(border);
+            canvas.drawRoundRect(r, radius, radius, p);
+            canvas.drawText(text, start, end, x + padX, y, paint);
+        }
+    }
+
     /** 小胶囊按钮（审批 / 提问用）。 */
     private TextView chip(String label, int color) {
         TextView t = Ui.tv(ctx, label, 12.5f, color);
@@ -1794,7 +1832,8 @@ public class ChatView extends ScrollView {
                 // 颜色跟正文一致 —— 以前染成琥珀色，满屏花花绿绿，读起来特别累。
                 out.setSpan(new android.text.style.TypefaceSpan("monospace"), st, out.length(), 0);
                 out.setSpan(new android.text.style.RelativeSizeSpan(0.92f), st, out.length(), 0);
-                out.setSpan(new android.text.style.BackgroundColorSpan(Ui.ICODE_BG), st, out.length(), 0);
+                out.setSpan(new RoundBg(Ui.ICODE_BG, Ui.ICODE_BD, Ui.dp(ctx, 4), Ui.dp(ctx, 3)),
+                        st, out.length(), 0);
                 // 行内代码里装的就是个链接（harness 也这么干）→ 顺手让它能点
                 String inner = out.subSequence(st, out.length()).toString().trim();
                 if (isWebUrl(inner)) {
