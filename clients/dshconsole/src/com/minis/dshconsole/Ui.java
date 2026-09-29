@@ -30,6 +30,30 @@ public class Ui {
     public static int TINT_TOOL, TINT_ERR, TINT_INJ;
     public static int PANEL, PANEL2;                 // 兼容旧名
     public static int CARD, CHIP_BG, CHIP_BD;        // 输入卡片底 / 胶囊底 / 胶囊描边
+
+    /** 自己画的软阴影底：view 的 padding 正好当"呼吸位"，shadowLayer 从内容区（= 卡片那一圈）往外晕开。
+     *  用它替 setElevation —— 又宽又扁的 view 走 spot shadow 只会冒出四角，直边被父层裁掉，调不动。
+     *  用法：v.setPadding(p,p,p,p); v.setBackground(new ShadowBg(act, 22, 8, 3, 0x1F000000, Ui.CARD));
+     *        v.setLayerType(View.LAYER_TYPE_SOFTWARE, null);   // 硬件层会忽略 shadowLayer */
+    public static class ShadowBg extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint p =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final float rad;
+
+        public ShadowBg(Context c, int radiusDp, int blurDp, int dyDp, int shadow, int fill) {
+            rad = dp(c, radiusDp);
+            p.setColor(fill);                                   // 和卡片同色，边上不留接缝
+            p.setShadowLayer(dp(c, blurDp), 0, dp(c, dyDp), shadow);
+        }
+
+        @Override public void draw(android.graphics.Canvas cv) {
+            cv.drawRoundRect(new android.graphics.RectF(getBounds()), rad, rad, p);   // 内容区即卡片
+        }
+
+        @Override public void setAlpha(int a) { p.setAlpha(a); }
+        @Override public void setColorFilter(android.graphics.ColorFilter f) { p.setColorFilter(f); }
+        @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+    }
     public static boolean DARK = true;               // 当前是否深色，亮色时状态栏图标要压黑
 
     /**
