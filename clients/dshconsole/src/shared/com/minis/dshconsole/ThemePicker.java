@@ -27,7 +27,9 @@ final class ThemePicker {
         android.widget.TextView title = Ui.tv(act, "外观", 18f, Ui.TEXT);
         title.setGravity(android.view.Gravity.CENTER);
         title.setPadding(0, Ui.dp(act, 18), 0, Ui.dp(act, 16));
-        card.addView(title);
+        card.addView(title, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
         card.addView(hairline(act));
 
         final android.widget.TextView[] dots = new android.widget.TextView[KEYS.length];
@@ -43,7 +45,10 @@ final class ThemePicker {
             dot.setPadding(0, 0, Ui.dp(act, 18), 0);
             dots[i] = dot;
             row.addView(dot);
-            row.addView(Ui.tv(act, LABELS[i], 17f, Ui.TEXT));
+            row.addView(Ui.tv(act, LABELS[i], 17f, Ui.TEXT),
+                    new android.widget.LinearLayout.LayoutParams(
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
 
             Ui.press(row, act, Ui.SURF3, 0);
             row.setOnClickListener(new android.view.View.OnClickListener() {
@@ -52,7 +57,9 @@ final class ThemePicker {
                     paintDots(dots, chosen[0]);
                 }
             });
-            card.addView(row);
+            card.addView(row, new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
         }
         paintDots(dots, chosen[0]);
         card.addView(hairline(act));
@@ -62,7 +69,9 @@ final class ThemePicker {
         ok.setGravity(android.view.Gravity.CENTER);
         ok.setPadding(0, Ui.dp(act, 15), 0, Ui.dp(act, 15));
         Ui.press(ok, act, Ui.SURF3, 0);
-        card.addView(ok);
+        card.addView(ok, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
 
         android.widget.FrameLayout holder = new android.widget.FrameLayout(act);
         int m = Ui.dp(act, 30);
@@ -96,11 +105,15 @@ final class ThemePicker {
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
                 int width = (int) (act.getResources().getDisplayMetrics().widthPixels * 0.86f);
                 w.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-                android.util.Log.i("DshTheme", "外观弹层: width=" + width
-                        + " 屏宽=" + act.getResources().getDisplayMetrics().widthPixels
-                        + " 卡片行数=" + card.getChildCount()
-                        + " 卡片高=" + card.getHeight()
-                        + " holder高=" + holder.getHeight());
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < card.getChildCount(); i++) {
+                    android.view.View ch = card.getChildAt(i);
+                    sb.append(i).append(':').append(ch.getClass().getSimpleName())
+                      .append('=').append(ch.getHeight()).append("  ");
+                }
+                android.util.Log.i("DshTheme", "外观弹层 width=" + width
+                        + " 卡片高=" + card.getHeight() + " holder高=" + holder.getHeight()
+                        + " 各子高: " + sb);
             }
         });
         dlg.show();
@@ -115,9 +128,13 @@ final class ThemePicker {
         }
     }
 
+    /** 细线：一定给死高度（MATCH_PARENT 宽 + 1dp 高），否则竖向布局会把它拉满。 */
     private static android.view.View hairline(android.content.Context c) {
         android.view.View v = new android.view.View(c);
         v.setBackgroundColor(Ui.STROKE2);
+        v.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.max(1, Ui.dp(c, 0.5f))));
         return v;
     }
 }

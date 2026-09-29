@@ -54,6 +54,14 @@ public class SettingsActivity extends Activity {
         setContentView(scaffold());
         showBuiltin();
         loadSections();
+        // 调试用：am start ... --ez themePicker true 直接弹出外观弹层（我自己验样式，不用你点）
+        if (getIntent() != null && getIntent().getBooleanExtra("themePicker", false)) {
+            findViewById(android.R.id.content).postDelayed(new Runnable() {
+                public void run() {
+                    ThemePicker.show(SettingsActivity.this);
+                }
+            }, 400);
+        }
     }
 
     protected void onResume() {
