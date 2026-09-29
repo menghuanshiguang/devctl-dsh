@@ -54,7 +54,8 @@ public class SettingsPanelActivity extends Activity {
         ui = new Handler(Looper.getMainLooper());
         store = new Store(this);
         String nm = store.def("dsh");
-        dev = store.find("dsh", nm);
+        dev = MainActivity.activeDevOf(store, nm);      // 模式在本地就指回环，远端就指选中那台
+        if (dev == null) dev = store.find("dsh", nm);
         if (dev == null) dev = new Store.Dev();
         if (getIntent() != null) {
             String s = getIntent().getStringExtra("id");
@@ -68,6 +69,7 @@ public class SettingsPanelActivity extends Activity {
         } catch (Throwable ignored) {
         }
         setTitle(label);
+        if (MainActivity.isLocal(store) && dev.name.length() == 0) dev.name = "local";
         root = new FrameLayout(this);
         root.setBackgroundColor(Ui.BG);
         setContentView(root);
