@@ -1,5 +1,9 @@
 # 任务：给 devctl-dsh 协议层补三个方法（settings.sections / settings.panel / settings.action）
 
+仓库：https://github.com/menghuanshiguang/devctl-dsh
+先 `git pull origin main`，所有改动都已经在 main 上（最新提交 77a36d0）。host 侧代码是根目录的 index.js，
+本提示词和契约文档在 clients/dshconsole/host-patch/ 下，两份都读一下再动手。
+
 ## 背景
 
 手机客户端 `clients/dshconsole` 的「设置」入口已经落地：点齿轮 → 新开 `SettingsActivity` → 侧边栏＝一级分区，
