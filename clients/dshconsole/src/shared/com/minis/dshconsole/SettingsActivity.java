@@ -40,6 +40,7 @@ public class SettingsActivity extends Activity {
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);   // 跟主页面一样不用系统标题栏
         Ui.applyTheme(this);
         ui = new Handler(Looper.getMainLooper());
         store = new Store(this);
@@ -48,7 +49,6 @@ public class SettingsActivity extends Activity {
         if (dev == null) dev = new Store.Dev();
         active = Cores.get().device(store, name);
         if (active == null) active = dev;
-        setTitle("设置");
         setContentView(scaffold());
         showBuiltin();
         loadSections();
@@ -62,12 +62,14 @@ public class SettingsActivity extends Activity {
     private View scaffold() {
         LinearLayout col = Ui.col(this);
         col.setBackgroundColor(Ui.BG);
-        col.setPadding(Ui.dp(this, Ui.PAD_H), Ui.dp(this, 8), Ui.dp(this, Ui.PAD_H), 0);
 
-        col.addView(Ui.tv(this, "设置", Ui.H1, Ui.TEXT));
-        subTitle = Ui.tv(this, deviceLine(), Ui.FS_SMALL, Ui.MUT);
-        col.addView(subTitle);
-        col.addView(Ui.gap(this, 10));
+        col.addView(topBar());                       // 顶栏跟主页面同一套：18dp 内边距 + 15.5f 标题 + 发丝线
+
+        LinearLayout body = Ui.col(this);
+        int ph = Ui.dp(this, Ui.PAD_H);
+        body.setPadding(ph, Ui.dp(this, 10), ph, Ui.dp(this, 26));   // 底部留出系统导航栏，别再被切
+        col.addView(body, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
@@ -76,14 +78,14 @@ public class SettingsActivity extends Activity {
             list.addView(localCard());
             list.addView(Ui.gap(this, 10));
         }
-        list.addView(Ui.tv(this, "DSH 原版设置（二级页）", 12f, Ui.MUT));
-        list.addView(Ui.gap(this, 6));
+        TextView sec = Ui.tv(this, "DSH 原版设置", 11.5f, Ui.DIM);   // 跟侧栏的 section 表头同一档
+        list.addView(sec);
+        list.addView(Ui.gap(this, 8));
         sc.addView(list, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        col.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        body.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        col.addView(Ui.gap(this, 6));
-        col.addView(Ui.hairline(this));
-        col.addView(webRow());
+        body.addView(Ui.gap(this, 10));
+        body.addView(webRow());                  // 原版网页也做成一张卡，形状跟上面统一
         return col;
     }
 
@@ -109,6 +111,38 @@ public class SettingsActivity extends Activity {
         wrap.addView(r, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         wrap.addView(Ui.gap(this, 6));
+        return wrap;
+    }
+
+    /** 顶栏：跟 MainActivity 同款（左边返回键、中间标题 + 一行小字、下面发丝线）。 */
+    private View topBar() {
+        LinearLayout bar = Ui.row(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(Ui.dp(this, 18), Ui.dp(this, 8), Ui.dp(this, 18), Ui.dp(this, 8));
+
+        TextView back = Ui.tv(this, "\u2039", 26f, Ui.TEXT);
+        back.setGravity(Gravity.CENTER);
+        back.setPadding(0, 0, Ui.dp(this, 12), 0);
+        back.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                finish();
+            }
+        });
+        bar.addView(back);
+
+        LinearLayout mid = Ui.col(this);
+        mid.addView(Ui.tv(this, "设置", 15.5f, Ui.TEXT));
+        subTitle = Ui.tv(this, deviceLine(), 11f, Ui.DIM);
+        mid.addView(subTitle);
+        bar.addView(mid, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        LinearLayout wrap = Ui.col(this);
+        wrap.addView(bar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        View hair = new View(this);
+        hair.setBackgroundColor(Ui.STROKE2);
+        wrap.addView(hair, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(this, 0.5f))));
         return wrap;
     }
 
@@ -231,14 +265,21 @@ public class SettingsActivity extends Activity {
     private View webRow() {
         LinearLayout r = Ui.row(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(this, 4), Ui.dp(this, 14), Ui.dp(this, 4), Ui.dp(this, 14));
+        r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
+        r.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, this));
         LinearLayout tx = Ui.col(this);
-        tx.addView(Ui.tv(this, "原版网页", 15f, Ui.TEXT));
+        tx.addView(Ui.tv(this, "原版网页", 15.5f, Ui.TEXT));
         String u = webUrl();
-        tx.addView(Ui.tv(this, u.length() == 0 ? "自动 · host 开了网页窗口就直接看原版界面" : u, 12f, Ui.MUT));
+        TextView sub = Ui.tv(this, u.length() == 0 ? "自动 · 开了网页窗口就直接看原版界面" : u, 12f, Ui.MUT);
+        sub.setSingleLine(true);
+        sub.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);      // 那串 token 别再折三行
+        tx.addView(sub);
         r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        r.addView(Ui.tv(this, u.length() == 0 ? "设置" : "改", 13.5f, Ui.ACCENT));
-        Ui.press(r, this, 0x00000000, Ui.R_CHIP);
+        TextView edit = Ui.tv(this, u.length() == 0 ? "设置" : "改", 12.5f, Ui.ACCENT);
+        edit.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
+        edit.setBackground(Ui.bg(Ui.SURF3, 12, this));
+        r.addView(edit);
+        Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
         r.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 webDialog();
