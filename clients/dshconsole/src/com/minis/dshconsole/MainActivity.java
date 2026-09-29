@@ -500,13 +500,12 @@ public class MainActivity extends Activity {
         return MODE_LOCAL.equals(store.get("runMode", MODE_REMOTE));
     }
 
-    public void setLocalMode(boolean local) {
-        store.set("runMode", local ? MODE_LOCAL : MODE_REMOTE);
-        syncModeUi();                       // 顶栏/侧栏的模式标记跟着变
+    /** 静态版：别的 Activity（设置一级/二级）也要跟着模式走，别再各读一份。 */
+    public static boolean isLocal(Store store) {
+        return MODE_LOCAL.equals(store.get("runMode", MODE_REMOTE));
     }
 
-    /** 本地模式的地址：本机回环 + 端口，令牌单独存（本地 harness 起在自己身上）。 */
-    public Store.Dev localDev() {
+    public static Store.Dev localDevOf(Store store) {
         Store.Dev d = new Store.Dev();
         d.name = "local";
         d.host = store.get("local:host", "127.0.0.1");
@@ -519,10 +518,25 @@ public class MainActivity extends Activity {
         return d;
     }
 
+    /** 协议头/网页窗口该指向谁：本地模式指回本机，否则还是选中那台。 */
+    public static Store.Dev activeDevOf(Store store, String dshName) {
+        if (isLocal(store)) return localDevOf(store);
+        return store.find("dsh", dshName);
+    }
+
+    public void setLocalMode(boolean local) {
+        store.set("runMode", local ? MODE_LOCAL : MODE_REMOTE);
+        syncModeUi();                       // 顶栏/侧栏的模式标记跟着变
+    }
+
+    /** 本地模式的地址（见静态版实现）。 */
+    public Store.Dev localDev() {
+        return localDevOf(store);
+    }
+
     /** 协议头指向谁：本地模式指回本机，远端模式还是原来那台。 */
     public Store.Dev activeDev() {
-        if (localMode()) return localDev();
-        return store.find("dsh", dshName);
+        return activeDevOf(store, dshName);
     }
 
     /** 顶栏上的模式徽章：一眼看出协议头指向谁，点一下进设置切。 */
