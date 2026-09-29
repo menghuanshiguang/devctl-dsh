@@ -438,6 +438,23 @@ public class Ui {
 
 
     /** \u7ad6\u8f68\uff1a\u5728 x \u5904\u753b\u4e00\u6761 w \u5bbd\u7684\u7ec6\u7ebf\uff0c\u4e0a\u4e0b\u5404\u7559 inset\uff0c\u7ed9\u8f68\u8ff9\u65f6\u95f4\u7ebf\u5f53\u80cc\u666f\u3002 */
+    /** 限高的 ScrollView：思考面板正文用它，最高 maxH，超出就在内部滚。 */
+    public static class MaxScroll extends android.widget.ScrollView {
+        public int maxH = 0;
+        public MaxScroll(android.content.Context c) {
+            super(c);
+            setVerticalScrollBarEnabled(false);
+            setFillViewport(true);
+        }
+        protected void onMeasure(int w, int h) {
+            super.onMeasure(w, h);
+            if (maxH > 0 && getMeasuredHeight() > maxH) {
+                super.onMeasure(w, android.view.View.MeasureSpec.makeMeasureSpec(
+                        maxH, android.view.View.MeasureSpec.AT_MOST));
+            }
+        }
+    }
+
     public static class Rail extends android.graphics.drawable.Drawable {
         private final android.graphics.Paint p =
                 new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
