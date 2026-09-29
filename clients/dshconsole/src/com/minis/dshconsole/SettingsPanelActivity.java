@@ -54,7 +54,7 @@ public class SettingsPanelActivity extends Activity {
         ui = new Handler(Looper.getMainLooper());
         store = new Store(this);
         String nm = store.def("dsh");
-        dev = MainActivity.activeDevOf(store, nm);      // 模式在本地就指回环，远端就指选中那台
+        dev = Core.device(store, nm);      // 模式在本地就指回环，远端就指选中那台
         if (dev == null) dev = store.find("dsh", nm);
         if (dev == null) dev = new Store.Dev();
         if (getIntent() != null) {
@@ -69,7 +69,7 @@ public class SettingsPanelActivity extends Activity {
         } catch (Throwable ignored) {
         }
         setTitle(label);
-        if (MainActivity.isLocal(store) && dev.name.length() == 0) dev.name = "local";
+        if (Core.local() && dev.name.length() == 0) dev.name = "local";
         root = new FrameLayout(this);
         root.setBackgroundColor(Ui.BG);
         setContentView(root);
@@ -490,7 +490,7 @@ public class SettingsPanelActivity extends Activity {
     /** 本地兜底：devctl 分区用 app 自己的配对记录 + 一次握手探测。 */
     private JSONObject localPanel(String sid) throws Exception {
         if ("devctl".equals(sid)) return devctlPanel();
-        boolean local = MainActivity.isLocal(store);
+        boolean local = Core.local();
         JSONObject o = new JSONObject();
         o.put("title", sid);
         o.put("subtitle", (local ? "本地 harness · " : "远端 · ") + (dev == null ? "" : dev.addr()));
@@ -500,7 +500,7 @@ public class SettingsPanelActivity extends Activity {
         c.put("kind", "card");
         c.put("text", "这一分区的内容由 DSH 自己的网页界面提供。");
         c.put("note", local
-                ? "本地模式要先把 harness 跑在这台手机上（local/start-local.sh），起来后这里会自动换成它的网页。"
+                ? "本地版的 harness 跑在 app 自己内部；环境装好后这里会自动换成它的网页。"
                 : "host 那侧开了网页窗口就会自动换成 DSH 自己的页面。");
         bs.put(c);
 
@@ -509,9 +509,6 @@ public class SettingsPanelActivity extends Activity {
         a.put("title", "怎么办");
         JSONArray rows = new JSONArray();
         rows.put(row2("地址", dev == null ? "" : dev.addr(), btn("重试连接", "retry", "")));
-        if (local) {
-            rows.put(row2("当前模式", "本地 harness", btn("切回远端", "mode", "remote")));
-        }
         a.put("rows", rows);
         bs.put(a);
 
@@ -639,21 +636,6 @@ public class SettingsPanelActivity extends Activity {
         if ("retry".equals(action)) {                 // 重新问一次网页窗口
             webNotice = null;
             webUrl = "";
-            start();
-            return;
-        }
-        if ("mode".equals(action)) {                  // 一键切回远端，然后照着新设备重开这一页
-            store.set("runMode", "remote".equals(arg) ? MainActivity.MODE_REMOTE : MainActivity.MODE_LOCAL);
-            webNotice = null;
-            webUrl = "";
-            String nm = store.def("dsh");
-            dev = MainActivity.activeDevOf(store, nm);
-            if (dev == null) dev = new Store.Dev();
-            try {
-                webUrl = store.get("web:" + dev.name, "");
-            } catch (Throwable ignored) {
-            }
-            Toast.makeText(this, "已切到" + ("remote".equals(arg) ? "远端" : "本地") + "模式", Toast.LENGTH_SHORT).show();
             start();
             return;
         }
