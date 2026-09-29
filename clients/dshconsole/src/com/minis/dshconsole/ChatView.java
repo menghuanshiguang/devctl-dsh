@@ -1595,9 +1595,6 @@ public class ChatView extends ScrollView {
             if (done) return;
             if (paraTv != null && paraBuf.length() > 0) paraTv.setText(paraBuf);
             done = true;
-            open = false;
-            body.setVisibility(View.GONE);
-            if (bodyWrap != null) bodyWrap.setVisibility(View.GONE);
             refresh();
         }
     }
