@@ -124,6 +124,36 @@ public class TabChat extends Tab {
         });
     }
 
+    /**
+     * 输入法动画：窗口设成 adjustNothing（不然系统会硬跳一下），
+     * 位移由我们自己按 IME 的那条 inset 做 220ms 的平移动画 —— 输入卡是"滑"上来的。
+     */
+    private void installImeAnimation(final View composer) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return;        // 30 以下拿不到 IME 类型 inset，就保持系统行为
+        try {
+            final View rootView = act.getWindow().getDecorView();
+            rootView.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                private int last = -1;
+
+                public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                    int ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                    if (ime != last) {
+                        last = ime;
+                        composer.animate().cancel();
+                        composer.animate()
+                                .translationY(-ime)
+                                .setDuration(ime == 0 ? 180 : 220)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                .start();
+                    }
+                    return insets;
+                }
+            });
+            rootView.requestApplyInsets();
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 装图片加载器：只有聊天页知道该用哪条连接去问 host 要字节。 */
     private void installImgLoader() {
         Img.setLoader(new Img.Loader() {
@@ -333,6 +363,7 @@ public class TabChat extends Tab {
         outer.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);            // 不开软层 shadowLayer 不生效
         outer.addView(card);
         box.addView(outer);
+        installImeAnimation(outer);          // 输入法弹出时把这块"托"上去
         return box;
     }
 
