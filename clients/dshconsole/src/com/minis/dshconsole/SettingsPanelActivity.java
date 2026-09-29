@@ -63,8 +63,7 @@ public class SettingsPanelActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(Ui.BG);
         setContentView(root);
-        if (webUrl.length() > 0) useWeb();
-        else useStructured();
+        start();
     }
 
     private void newWeb() {
@@ -94,7 +93,64 @@ public class SettingsPanelActivity extends Activity {
             return;
         }
         useStructured();
-        probeWindow();
+        askWebWindow();
+    }
+
+    /** 问 host 一句「网页窗口开了没、在几号端口」——端口由 host 的 hello 带回来，不猜。 */
+    private void askWebWindow() {
+        if (dev == null || dev.host.length() == 0) return;
+        new Thread(new Runnable() {
+            public void run() {
+                String base = null;
+                String why = "";
+                Dsh live = null;
+                try {
+                    live = Dsh.open(dev, 5000, "DshConsole-settings", "android");
+                    JSONObject w = live.hello == null ? null : live.hello.optJSONObject("web");
+                    if (w != null) {
+                        int p = w.optInt("port", 0);
+                        if (w.optBoolean("ready", false) && p > 0) base = "http://" + dev.host + ":" + p;
+                        else why = webReason(w.optString("reason", ""));
+                    }
+                } catch (Throwable ignored) {
+                } finally {
+                    if (live != null) {
+                        try {
+                            live.close();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+                final String found = base;
+                final String reason = why;
+                if (found == null && reason.length() > 0) {
+                    // host 明确说了「没开」，那就别再猜端口了。
+                    ui.post(new Runnable() {
+                        public void run() {
+                            if (webMode) Toast.makeText(SettingsPanelActivity.this, "DSH 原版网页：" + reason, Toast.LENGTH_LONG).show();
+                        }
+                    });
+                    return;
+                }
+                if (found != null) {
+                    ui.post(new Runnable() {
+                        public void run() {
+                            webUrl = found + "/?token=" + dev.token;
+                            if (!webMode || web == null) useWeb();
+                        }
+                    });
+                    return;
+                }
+                probeWindow();          // 老版 host：hello 里没有 web 字段，退回探测
+            }
+        }).start();
+    }
+
+    private String webReason(String reason) {
+        if ("host-web-not-found".equals(reason)) return "host 上没找到 DSH 网页服务，先在 host 上把 DSH 的网页窗口开起来";
+        if ("discovery-failed".equals(reason)) return "没扫到 DSH 网页服务，检查 host 上的 DSH 网页窗口";
+        if ("searching".equals(reason)) return "host 还在找自己的网页服务，等一下再进";
+        return "网页窗口没开（" + reason + "）";
     }
 
     /** 问 host 一句「网页窗口开了没」，开了就切原版页面（失败就留在结构化视图）。 */
