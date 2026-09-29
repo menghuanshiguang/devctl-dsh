@@ -45,6 +45,8 @@ public class SettingsPanelActivity extends Activity {
     private String webUrl = "";
     /** 原版网页拿不到时的原因说明，进结构化视图时当第一张卡显示。 */
     private String webNotice = null;
+    /** 一级页列表里的序号：注入脚本文字对不上时按它兜底点第几个分区。 */
+    private int index = -1;
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -59,6 +61,7 @@ public class SettingsPanelActivity extends Activity {
             if (s != null && s.length() > 0) id = s;
             String l = getIntent().getStringExtra("label");
             if (l != null && l.length() > 0) label = l;
+            index = getIntent().getIntExtra("index", -1);
         }
         try {
             webUrl = store.get("web:" + dev.name, "");
@@ -261,7 +264,54 @@ public class SettingsPanelActivity extends Activity {
     /** 网页加载完：进设置 → 点目标分区 → 撑成全屏页面。 */
     private void inject() {
         web.evaluateJavascript(DsWeb.hideWidgets(), null);
-        DsWeb.apply(web, label);
+        DsWeb.apply(web, label, id, index);
+        confirmSection();
+    }
+
+    /**
+     * 几秒后问一句「现在停在哪个分区」：对不上就在界面上说清楚，
+     * 别让用户对着「通用设置」发呆还以为自己点错了。
+     */
+    private void confirmSection() {
+        if (web == null || (label.length() == 0 && id.length() == 0)) return;
+        ui.postDelayed(new Runnable() {
+            public void run() {
+                if (web == null) return;
+                DsWeb.probe(web, new android.webkit.ValueCallback<String>() {
+                    public void onReceiveValue(String value) {
+                        final String cur = unquote(value);
+                        if (cur.length() == 0) return;
+                        if (norm(cur).equals(norm(label)) || norm(cur).equals(norm(id))) return;
+                        ui.post(new Runnable() {
+                            public void run() {
+                                Toast.makeText(SettingsPanelActivity.this,
+                                        "没跳到「" + label + "」，在顶部胶囊里点一下（现在：" + cur + "）",
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                });
+            }
+        }, 2800);
+    }
+
+    private static String unquote(String v) {
+        if (v == null) return "";
+        String s = v.trim();
+        if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) s = s.substring(1, s.length() - 1);
+        return s;
+    }
+
+    private static String norm(String v) {
+        if (v == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (Character.isWhitespace(c)) continue;
+            if (c == '(' || c == ')' || c == '（' || c == '）' || c == '·' || c == '-' || c == '_') continue;
+            sb.append(Character.toLowerCase(c));
+        }
+        return sb.toString();
     }
 
     private String hideJs() {
@@ -283,7 +333,7 @@ public class SettingsPanelActivity extends Activity {
                 ((TextView) v).setText(sideHidden ? "▣" : "☰");
                 if (web == null) return;
                 if (sideHidden) {
-                    DsWeb.apply(web, label);
+                    DsWeb.apply(web, label, id, index);
                     Toast.makeText(SettingsPanelActivity.this, "全屏设置页", Toast.LENGTH_SHORT).show();
                 } else {
                     DsWeb.restore(web);

@@ -1,10 +1,30 @@
 (function () {
   'use strict';
   var LABEL = __LABEL__;
-  if (window.__dsSettingsPage) { window.__dsSettingsPage.setLabel(LABEL); return; }
+  var SECTION_ID = __SECTION_ID__;
+  var SECTION_INDEX = __SECTION_INDEX__;
+  if (window.__dsSettingsPage) { window.__dsSettingsPage.setTarget(LABEL, SECTION_ID, SECTION_INDEX); return; }
 
   var STYLE_ID = 'ds-settings-page-style';
-  var state = { label: LABEL, active: null, clicks: 0, done: false };
+  var state = { label: LABEL, id: SECTION_ID, index: SECTION_INDEX, active: null, clicks: 0, done: false, hit: '' };
+
+  /** 归一化：去掉空格和常见标点、压成小写 —— 「Agent 预设」和「agent预设」要算同一个。 */
+  function norm(t) {
+    return (t || '').replace(/[\s\u3000()\uff08\uff09\u3010\u3011\u00b7\-_,.\uff0c\u3001\/]/g, '').toLowerCase();
+  }
+
+  /** 一级页传下来的东西凑成候选：显示名优先，再试 id，最后试去掉「设置」尾巴的名字。 */
+  function candidates() {
+    var list = [state.label, state.id], out = [], i, v, tail;
+    for (i = 0; i < list.length; i++) {
+      v = norm(list[i]);
+      if (!v) continue;
+      if (out.indexOf(v) < 0) out.push(v);
+      tail = v.replace(/\u8bbe\u7f6e$/, '');
+      if (tail && out.indexOf(tail) < 0) out.push(tail);
+    }
+    return out;
+  }
 
   function log(m) { try { console.log('[ds]' + m); } catch (e) {} }
 
@@ -17,7 +37,7 @@
       nodes = zone.querySelectorAll('h1,h2,h3,h4,div,span,p');
       for (i = 0; i < nodes.length; i++) {
         if (nodes[i].children.length) continue;
-        t = (nodes[i].textContent || '').replace(/ /g, '');
+        t = norm(nodes[i].textContent);
         if (t === want) return true;
       }
     }
@@ -143,33 +163,48 @@
   }
 
   function select() {
-    var overlay, want, cells, exact = null, loose = null, i, t, target, names = [];
-    if (!state.label) return true;
+    var overlay, wants, w, cells, exact = null, loose = null, i, t, target, names = [], via = '';
+    if (!state.label && !state.id) return true;
     if (state.done) return true;
     overlay = findOverlay();
     if (!overlay) return false;
-    want = (state.label || '').replace(/ /g, '');
+    wants = candidates();
     cells = subAll(overlay, 'navCell');
     if (!cells.length) cells = overlay.querySelectorAll('button,[role="button"]');
     for (i = 0; i < cells.length; i++) {
       t = txt(cells[i]);
       if (!t || t.length > 14) continue;
       names.push(t);
-      if (t === want) { exact = cells[i]; break; }
-      if (!loose && (t.indexOf(want) === 0 || want.indexOf(t) === 0)) loose = cells[i];
     }
-    if (!state.logged) { state.logged = true; log('cells=' + names.join('|') + ' want=' + want); }
+    for (w = 0; w < wants.length && !exact; w++) {
+      for (i = 0; i < cells.length; i++) {
+        t = txt(cells[i]);
+        if (!t || t.length > 14) continue;
+        if (norm(t) === wants[w]) { exact = cells[i]; via = 'exact:' + wants[w]; break; }
+        if (!loose && (norm(t).indexOf(wants[w]) === 0 || wants[w].indexOf(norm(t)) === 0)) {
+          loose = cells[i];
+          via = 'prefix:' + wants[w];
+        }
+      }
+    }
+    if (!state.logged) { state.logged = true; log('cells=' + names.join('|') + ' want=' + wants.join('/')); }
     var cur = headerTitle(overlay);
     if (cur !== state.curTitle) { state.curTitle = cur; log('header=' + cur); }
-    if (showsSection(overlay, want)) { state.done = true; log('done ' + want); return true; }
+    for (w = 0; w < wants.length; w++) {
+      if (showsSection(overlay, wants[w])) { state.done = true; state.hit = cur; log('done ' + wants[w]); return true; }
+    }
     target = exact || loose;
-    if (!target) { log('no cell for ' + want); return false; }
+    if (!target && state.index >= 0 && state.index < cells.length) {
+      target = cells[state.index];                 // 兜底：一级列表的序号和网页分区顺序一致
+      via = 'index:' + state.index;
+    }
+    if (!target) { log('no cell for ' + wants.join('/')); return false; }
     if (isActive(target)) { state.done = true; log('already active ' + want); return true; }
     if (state.clicks >= 3) { state.done = true; log('give up ' + want + ' cur=' + cur); return true; }
     if (Date.now() - (state.lastClick || 0) < 700) return true;
     state.lastClick = Date.now();
     state.clicks += 1;
-    log('click #' + state.clicks + ' want=' + want + ' hit=' + txt(target) + ' cur=' + cur);
+    log('click #' + state.clicks + ' ' + via + ' hit=' + txt(target) + ' cur=' + cur);
     try { target.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (e) {}
     target.click();
     return true;
@@ -219,7 +254,21 @@
     apply: apply,
     select: select,
     restore: restore,
-    setLabel: function (l) { state.label = l; state.active = null; state.target = null; state.clicks = 0; state.done = false; state.logged = false; run(); }
+    setLabel: function (l) { window.__dsSettingsPage.setTarget(l, '', -1); },
+    setTarget: function (l, sid, idx) {
+      state.label = l || '';
+      state.id = sid || '';
+      state.index = (typeof idx === 'number') ? idx : -1;
+      state.active = null;
+      state.target = null;
+      state.clicks = 0;
+      state.done = false;
+      state.logged = false;
+      state.hit = '';
+      run();
+    },
+    /** 现在停在哪个分区（给外面做「没跳过去」的提示用）。 */
+    header: function () { var o = findOverlay(); return o ? headerTitle(o) : ''; }
   };
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') boot();

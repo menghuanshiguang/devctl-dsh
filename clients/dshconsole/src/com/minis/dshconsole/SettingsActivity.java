@@ -76,7 +76,7 @@ public class SettingsActivity extends Activity {
     }
 
     /** 一行分区：标题 + 说明 + ›，点了开二级活动。 */
-    private View item(final String id, final String label) {
+    private View item(final String id, final String label, final int index) {
         LinearLayout r = Ui.row(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
         r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
@@ -90,7 +90,7 @@ public class SettingsActivity extends Activity {
         Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
         r.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                openPanel(id, label);
+                openPanel(id, label, index);
             }
         });
         LinearLayout wrap = Ui.col(this);
@@ -100,9 +100,17 @@ public class SettingsActivity extends Activity {
         return wrap;
     }
 
+    /** 一行分区下面的说明：能拿实时值就给实时值，别让用户点进去才知道自己连的是哪台。 */
     private String hint(String id) {
-        if ("devctl".equals(id)) return "配对地址、令牌、二维码";
-        if ("general".equals(id)) return "主题、语言、启动行为";
+        if ("devctl".equals(id)) {
+            String a = dev == null ? "" : dev.addr();
+            String w = dev == null ? "" : store.get("web:" + dev.name, "");
+            if (a.length() > 0) return w.length() > 0 ? a + " · 原版网页可用" : a;
+            return "配对地址、令牌、二维码";
+        }
+        if ("general".equals(id)) {
+            return (Ui.DARK ? "主题：暗色" : "主题：亮色") + " · 语言、启动行为";
+        }
         if ("models".equals(id)) return "模型与密钥";
         if ("plugins".equals(id)) return "启用 / 停用";
         if ("presets".equals(id)) return "内置 Agent 预设";
@@ -119,7 +127,7 @@ public class SettingsActivity extends Activity {
     private void fill(String[] ids, String[] labels) {
         if (list == null) return;
         list.removeAllViews();
-        for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i]));
+        for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i], i));
         list.addView(Ui.gap(this, 10));
     }
 
@@ -157,11 +165,16 @@ public class SettingsActivity extends Activity {
         }).start();
     }
 
-    private void openPanel(String id, String label) {
+    /**
+     * 进二级页：把显示名、分区 id、列表序号都带上。
+     * 网页那边的分区名未必和 host 给的名字一模一样，多带一条「序号」就有兜底。
+     */
+    private void openPanel(String id, String label, int index) {
         try {
             android.content.Intent it = new android.content.Intent(this, SettingsPanelActivity.class);
             it.putExtra("id", id);
             it.putExtra("label", label);
+            it.putExtra("index", index);
             startActivity(it);
         } catch (Throwable t) {
             Toast.makeText(this, "打开失败：" + t, Toast.LENGTH_SHORT).show();
