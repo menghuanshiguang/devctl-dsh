@@ -56,3 +56,14 @@ host-patch/                 host 侧补丁说明（思考内容放行）
 design/mock.html            UI 草图
 build.py                    构建脚本
 ```
+
+## 设置页（一级 / 二级）
+
+手机屏小，所以设置拆成两个 Activity：
+
+- **一级 `SettingsActivity`**：只有侧边栏那一列。分区表优先问 host 的 `settings.sections`，host 没实现就用内置表；底部一行是「原版网页」入口（手填地址可以覆盖自动发现）。
+- **二级 `SettingsPanelActivity`**：一个分区的正文。**优先直接加载 DSH 原版网页**（host 侧 `remote-web.js` 的局域网窗口开着时会自动发现并切进去），打不开就回落到 app 自己的结构化渲染（`settings.panel` / 本地 devctl 面板）。
+
+原版网页模式下：DSH 自带的侧边栏按几何判据自动收起（右上角 ☰ 可切回来），并自动点中对应分区；长按 ☰ 切回 app 界面。
+
+这么拆的意义是**兼容性**：设置页本身是 Web 客户端，插件都通过 client bundle 注册自己的分区，所以只有加载这个页面才能把别人的分区原样带出来，而不是给每个插件重写一遍面板。

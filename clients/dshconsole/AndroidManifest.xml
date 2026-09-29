@@ -20,5 +20,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="DSH 设置"
+            android:configChanges="0x4A0" />
+        <activity
+            android:name=".SettingsPanelActivity"
+            android:exported="false"
+            android:label="DSH 设置"
+            android:configChanges="0x4A0" />
     </application>
 </manifest>

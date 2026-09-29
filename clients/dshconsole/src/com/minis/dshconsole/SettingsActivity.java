@@ -1,273 +1,234 @@
 package com.minis.dshconsole;
 
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
-import android.graphics.Color;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
+import android.text.InputType;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** 实时读取 DSH 设置的独立页面：侧边栏＝一级，点进二级；内容用 WebView 渲染、可点。 */
+/**
+ * 设置一级页：只有侧边栏（分区列表）。手机屏小，二级内容放到另一个活动里。
+ * 分区表优先问 host 的 settings.sections，拿不到就用内置表。
+ */
 public class SettingsActivity extends Activity {
 
     private static final String[] D_IDS = {"general", "models", "plugins", "presets", "devctl", "rules", "market", "cards"};
-    private static final String[] D_LABELS = {"\u901a\u7528\u8bbe\u7f6e", "\u6a21\u578b", "\u5185\u7f6e\u63d2\u4ef6", "Agent \u9884\u8bbe",
-            "devctl", "\u89c4\u5219\u8bbe\u5b9a", "\u63d2\u4ef6\u5e02\u573a", "\u4fa7\u8fb9\u5361\u7247"};
+    private static final String[] D_LABELS = {"通用设置", "模型", "内置插件", "Agent 预设", "devctl", "规则设定", "插件市场", "侧边卡片"};
 
-    private WebView web;
+    private LinearLayout list;
     private Handler ui;
     private Store store;
     private Store.Dev dev;
-    private String cur = "devctl";
-    private boolean revealToken = false;
+    private boolean fromHost = false;
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Ui.applyTheme(this);
         ui = new Handler(Looper.getMainLooper());
         store = new Store(this);
         String name = store.def("dsh");
         dev = store.find("dsh", name);
-        if (dev == null) {
-            dev = new Store.Dev();
-        }
-        setTitle("DSH \u8bbe\u7f6e");
-        web = new WebView(this);
-        web.setBackgroundColor(Color.WHITE);
-        WebSettings s = web.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        web.setWebViewClient(new WebViewClient());
-        web.addJavascriptInterface(new Bridge(), "dshNative");
-        web.loadDataWithBaseURL("dsh://settings/", SHELL, "text/html", "utf-8", null);
-        setContentView(web);
-        ui.postDelayed(new Runnable() {
-            public void run() {
-                boot();
+        if (dev == null) dev = new Store.Dev();
+        setTitle("设置");
+        setContentView(scaffold());
+        showBuiltin();
+        loadSections();
+    }
+
+    protected void onResume() {
+        super.onResume();
+        if (!fromHost) showBuiltin();
+    }
+
+    private View scaffold() {
+        LinearLayout col = Ui.col(this);
+        col.setBackgroundColor(Ui.BG);
+        col.setPadding(Ui.dp(this, Ui.PAD_H), Ui.dp(this, 8), Ui.dp(this, Ui.PAD_H), 0);
+
+        col.addView(Ui.tv(this, "设置", Ui.H1, Ui.TEXT));
+        String sub = dev.name.length() == 0 ? "未配对设备" : ("设备 · " + dev.addr());
+        col.addView(Ui.tv(this, sub, Ui.FS_SMALL, Ui.MUT));
+        col.addView(Ui.gap(this, 10));
+
+        ScrollView sc = new ScrollView(this);
+        sc.setVerticalScrollBarEnabled(false);
+        list = Ui.col(this);
+        sc.addView(list, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        col.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        col.addView(Ui.gap(this, 6));
+        col.addView(Ui.hairline(this));
+        col.addView(webRow());
+        return col;
+    }
+
+    /** 一行分区：标题 + 说明 + ›，点了开二级活动。 */
+    private View item(final String id, final String label) {
+        LinearLayout r = Ui.row(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
+        LinearLayout tx = Ui.col(this);
+        tx.addView(Ui.tv(this, label, 15.5f, Ui.TEXT));
+        String sub = hint(id);
+        if (sub.length() > 0) tx.addView(Ui.tv(this, sub, 12f, Ui.MUT));
+        r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.addView(Ui.tv(this, "›", 17f, Ui.MUT));
+        r.setBackground(Ui.bg(Ui.SURF2, Ui.R_CARD, this));
+        Ui.press(r, this, Ui.SURF3, Ui.R_CARD);
+        r.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                openPanel(id, label);
             }
-        }, 320);
+        });
+        LinearLayout wrap = Ui.col(this);
+        wrap.addView(r, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        wrap.addView(Ui.gap(this, 6));
+        return wrap;
     }
 
-    /** JS 回调入口（跑在 WebView 的线程上，别直接碰 UI）。 */
-    public class Bridge {
-        @JavascriptInterface
-        public void section(String id) {
-            request(id);
-        }
-
-        @JavascriptInterface
-        public void act(final String id, final String action, final String arg) {
-            doAct(id, action, arg);
-        }
+    private String hint(String id) {
+        if ("devctl".equals(id)) return "配对地址、令牌、二维码";
+        if ("general".equals(id)) return "主题、语言、启动行为";
+        if ("models".equals(id)) return "模型与密钥";
+        if ("plugins".equals(id)) return "启用 / 停用";
+        if ("presets".equals(id)) return "内置 Agent 预设";
+        if ("rules".equals(id)) return "权限与规则";
+        if ("market".equals(id)) return "浏览与安装";
+        if ("cards".equals(id)) return "侧边栏卡片";
+        return "";
     }
 
-    /** 拉分区列表：优先问 host（settings.sections），拿不到就用内置表。 */
-    private void boot() {
+    private void showBuiltin() {
+        fill(D_IDS, D_LABELS);
+    }
+
+    private void fill(String[] ids, String[] labels) {
+        if (list == null) return;
+        list.removeAllViews();
+        for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i]));
+        list.addView(Ui.gap(this, 10));
+    }
+
+    /** 分区表问 host（settings.sections）；host 没实现就保持内置表。 */
+    private void loadSections() {
+        if (dev == null || dev.host.length() == 0) return;
         new Thread(new Runnable() {
             public void run() {
-                JSONArray list = new JSONArray();
+                final java.util.ArrayList<String> ids = new java.util.ArrayList<String>();
+                final java.util.ArrayList<String> labels = new java.util.ArrayList<String>();
                 try {
                     JSONObject r = call("settings.sections", new JSONObject());
                     JSONArray got = r == null ? null : r.optJSONArray("sections");
                     if (got != null) {
                         for (int i = 0; i < got.length(); i++) {
                             JSONObject s = got.optJSONObject(i);
-                            if (s != null && s.optString("id", "").length() > 0) list.put(s);
-                        }
-                    }
-                } catch (Throwable ignored) {
-                    // host 还没实现，用内置
-                }
-                try {
-                    if (list.length() == 0) {
-                        for (int i = 0; i < D_IDS.length; i++) {
-                            JSONObject s = new JSONObject();
-                            s.put("id", D_IDS[i]);
-                            s.put("label", D_LABELS[i]);
-                            list.put(s);
+                            if (s == null) continue;
+                            String id = s.optString("id", "");
+                            if (id.length() == 0) continue;
+                            ids.add(id);
+                            String lb = s.optString("label", "");
+                            labels.add(lb.length() == 0 ? id : lb);
                         }
                     }
                 } catch (Throwable ignored) {
                 }
-                final JSONArray f = list;
-                String q = "\"devctl\"";
-                try {
-                    q = JSONObject.quote(cur);
-                } catch (Throwable ignored) {
-                }
-                final String fq = q;
+                if (ids.size() == 0) return;
+                fromHost = true;
                 ui.post(new Runnable() {
                     public void run() {
-                        js("renderSide(" + f.toString() + "," + fq + ")");
-                        request(cur);
+                        fill(ids.toArray(new String[0]), labels.toArray(new String[0]));
                     }
                 });
             }
         }).start();
     }
 
-    /** 读一个分区的二级页面。 */
-    private void request(final String id) {
-        cur = id;
-        new Thread(new Runnable() {
-            public void run() {
-                JSONObject panel = null;
-                String err = null;
-                try {
-                    panel = panelOf(id);
-                } catch (Throwable t) {
-                    err = String.valueOf(t.getMessage());
-                }
-                final JSONObject fp = panel;
-                final String fe = err;
-                ui.post(new Runnable() {
-                    public void run() {
-                        if (fp != null) {
-                            js("show(" + fp.toString() + ")");
-                            return;
-                        }
-                        String s = null;
+    private void openPanel(String id, String label) {
+        try {
+            android.content.Intent it = new android.content.Intent(this, SettingsPanelActivity.class);
+            it.putExtra("id", id);
+            it.putExtra("label", label);
+            startActivity(it);
+        } catch (Throwable t) {
+            Toast.makeText(this, "打开失败：" + t, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // —— 底部：原版网页入口（二级页直接吃 DSH 自己的网页，插件分区就不会漏） ——
+
+    private View webRow() {
+        LinearLayout r = Ui.row(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(Ui.dp(this, 4), Ui.dp(this, 14), Ui.dp(this, 4), Ui.dp(this, 14));
+        LinearLayout tx = Ui.col(this);
+        tx.addView(Ui.tv(this, "原版网页", 15f, Ui.TEXT));
+        String u = webUrl();
+        tx.addView(Ui.tv(this, u.length() == 0 ? "自动 · host 开了网页窗口就直接看原版界面" : u, 12f, Ui.MUT));
+        r.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.addView(Ui.tv(this, u.length() == 0 ? "设置" : "改", 13.5f, Ui.ACCENT));
+        Ui.press(r, this, 0x00000000, Ui.R_CHIP);
+        r.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                webDialog();
+            }
+        });
+        return r;
+    }
+
+    private String key() {
+        return "web:" + (dev == null ? "" : dev.name);
+    }
+
+    private String webUrl() {
+        try {
+            return store.get(key(), "");
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private void webDialog() {
+        final EditText in = Ui.input(this, "http://192.168.2.7:3081/?token=…");
+        in.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        in.setText(webUrl());
+        new AlertDialog.Builder(this)
+                .setTitle("DSH 网页地址")
+                .setMessage("在跑 DSH 的机器上 `dsh web` 会把地址打在屏幕上；要手机能访问，加上 --host 0.0.0.0。")
+                .setView(in)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
                         try {
-                            s = card("\u8bfb\u53d6\u5931\u8d25", fe).toString();
+                            store.set(key(), in.getText().toString().trim());
                         } catch (Throwable ignored) {
                         }
-                        js("show(" + (s == null ? "{}" : s) + ")");
+                        setContentView(scaffold());
                     }
-                });
-            }
-        }).start();
-    }
-
-    private JSONObject panelOf(String id) throws Exception {
-        if (dev != null && dev.host.length() > 0) {
-            try {
-                JSONObject params = new JSONObject();
-                params.put("id", id);
-                JSONObject r = call("settings.panel", params);
-                JSONObject p = r == null ? null : r.optJSONObject("panel");
-                if (p != null) return p;
-            } catch (Throwable ignored) {
-                // host 侧还没实现 settings.panel
-            }
-        }
-        return localPanel(id);
-    }
-
-    /** 本地兜底：devctl 分区用 app 自己的配对记录 + 一次握手探测。 */
-    private JSONObject localPanel(String id) throws Exception {
-        if ("devctl".equals(id)) return devctlPanel();
-        JSONObject o = new JSONObject();
-        o.put("title", labelOf(id));
-        JSONArray bs = new JSONArray();
-        JSONObject c = new JSONObject();
-        c.put("kind", "card");
-        c.put("text", "\u8fd9\u4e00\u5206\u533a\u7531 DSH \u4e3b\u7a0b\u5e8f\u63d0\u4f9b\u3002");
-        c.put("note", "\u9700\u8981 host \u4fa7\u534f\u8bae\u6269\u5c55\uff08settings.panel\uff09\u540e\u624d\u80fd\u5b9e\u65f6\u8bfb\u53d6\u3002");
-        bs.put(c);
-        o.put("blocks", bs);
-        return o;
-    }
-
-    /** devctl 分区：app 侧就能实时算出来的那部分（配对地址、令牌、配对命令、Host 版本）。 */
-    private JSONObject devctlPanel() throws Exception {
-        String ver = "";
-        String host = "";
-        Dsh live = null;
-        try {
-            if (dev != null && dev.host.length() > 0) {
-                live = Dsh.open(dev, 5000, "DshConsole-settings", "android");
-                JSONObject h = live.hello == null ? null : live.hello.optJSONObject("host");
-                if (h != null) {
-                    ver = h.optString("version", "");
-                    host = h.optString("name", "");
-                    String plat = h.optString("platform", "");
-                    if (host.length() > 0 && plat.length() > 0) host = host + " \u00b7 " + plat;
-                }
-                if (ver.length() == 0 && live.hello != null) ver = live.hello.optString("version", "");
-            }
-        } catch (Throwable ignored) {
-        } finally {
-            if (live != null) {
-                try {
-                    live.close();
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-
-        JSONObject o = new JSONObject();
-        o.put("title", "devctl \u8fdc\u7a0b\u63a7\u5236");
-        o.put("subtitle", "\u4ece\u624b\u673a\u6216\u5176\u4ed6\u8bbe\u5907\u7528 dshctl \u9a71\u52a8\u8fd9\u53f0 DSH");
-        JSONArray blocks = new JSONArray();
-
-        JSONObject c1 = new JSONObject();
-        c1.put("kind", "card");
-        JSONArray rows = new JSONArray();
-        rows.put(row("\u8bbe\u5907", dev == null ? "" : dev.name, null, null));
-        rows.put(row("\u5730\u5740", dev == null ? "" : dev.addr(), null,
-                new JSONArray().put(btn("\u590d\u5236", "copy", dev == null ? "" : dev.addr()))));
-        if (host.length() > 0) rows.put(row("Host", host, null, null));
-        if (ver.length() > 0) rows.put(row("\u7248\u672c", ver, null, null));
-        String token = dev == null ? "" : dev.token;
-        JSONArray tbtns = new JSONArray();
-        tbtns.put(btn(revealToken ? "\u9690\u85cf" : "\u663e\u793a", revealToken ? "hide-token" : "reveal-token", ""));
-        tbtns.put(btn("\u590d\u5236", "copy", token));
-        rows.put(row("\u8bbf\u95ee\u4ee4\u724c", revealToken ? token : mask(token), null, tbtns));
-        c1.put("rows", rows);
-        blocks.put(c1);
-
-        JSONObject c2 = new JSONObject();
-        c2.put("kind", "card");
-        c2.put("title", "\u914d\u5bf9\u547d\u4ee4");
-        c2.put("text", "\u5728\u53e6\u4e00\u53f0\u8bbe\u5907\u4e0a\u88c5\u597d dshctl \u540e\u8fd0\u884c\uff1a");
-        String nm = dev == null || dev.name.length() == 0 ? "home" : dev.name;
-        String cmd = "dshctl add " + nm + " " + (dev == null ? "" : dev.addr()) + " --token " + token;
-        JSONArray r2 = new JSONArray();
-        r2.put(row("\u547d\u4ee4", cmd, null, new JSONArray().put(btn("\u590d\u5236", "copy", cmd))));
-        c2.put("rows", r2);
-        blocks.put(c2);
-
-        o.put("blocks", blocks);
-        return o;
-    }
-
-    private JSONObject row(String k, String v, String badge, JSONArray btns) throws Exception {
-        JSONObject o = new JSONObject();
-        o.put("k", k);
-        o.put("v", v == null ? "" : v);
-        if (badge != null) o.put("badge", badge);
-        if (btns != null) o.put("btns", btns);
-        return o;
-    }
-
-    private JSONObject btn(String label, String action, String arg) throws Exception {
-        JSONObject o = new JSONObject();
-        o.put("label", label);
-        o.put("action", action);
-        o.put("arg", arg == null ? "" : arg);
-        return o;
-    }
-
-    private String mask(String t) {
-        if (t == null || t.length() == 0) return "\u2014";
-        if (t.length() <= 8) return "\u2022\u2022\u2022\u2022";
-        return t.substring(0, 4) + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" + t.substring(t.length() - 4);
-    }
-
-    private String labelOf(String id) {
-        for (int i = 0; i < D_IDS.length; i++) {
-            if (D_IDS[i].equals(id)) return D_LABELS[i];
-        }
-        return id == null ? "\u8bbe\u7f6e" : id;
+                })
+                .setNeutralButton("清空", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        try {
+                            store.set(key(), "");
+                        } catch (Throwable ignored) {
+                        }
+                        setContentView(scaffold());
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 一次性连接：发一条请求就关掉（设置页不需要常连）。 */
@@ -285,114 +246,4 @@ public class SettingsActivity extends Activity {
             }
         }
     }
-
-    private void doAct(final String id, final String action, final String arg) {
-        if ("reveal-token".equals(action) || "hide-token".equals(action)) {
-            revealToken = "reveal-token".equals(action);
-            request(id);
-            return;
-        }
-        if ("copy".equals(action)) {
-            copy(arg);
-            return;
-        }
-        new Thread(new Runnable() {
-            public void run() {
-                String msg = null;
-                boolean reload = false;
-                try {
-                    JSONObject params = new JSONObject();
-                    params.put("id", id);
-                    params.put("action", action);
-                    params.put("arg", arg == null ? "" : arg);
-                    JSONObject r = call("settings.action", params);
-                    if (r != null) {
-                        msg = r.optString("message", "");
-                        reload = r.optBoolean("reload", false);
-                    }
-                } catch (Throwable t) {
-                    msg = "host \u6682\u4e0d\u652f\u6301\u8be5\u64cd\u4f5c";
-                }
-                final String fm = msg;
-                final boolean fr = reload;
-                ui.post(new Runnable() {
-                    public void run() {
-                        if (fm != null && fm.length() > 0) {
-                            Toast.makeText(SettingsActivity.this, fm, Toast.LENGTH_SHORT).show();
-                        }
-                        if (fr) request(id);
-                    }
-                });
-            }
-        }).start();
-    }
-
-    private void copy(final String text) {
-        ui.post(new Runnable() {
-            public void run() {
-                try {
-                    ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    cm.setPrimaryClip(ClipData.newPlainText("dsh", text == null ? "" : text));
-                    Toast.makeText(SettingsActivity.this, "\u5df2\u590d\u5236", Toast.LENGTH_SHORT).show();
-                } catch (Throwable t) {
-                    Toast.makeText(SettingsActivity.this, "\u590d\u5236\u5931\u8d25", Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
-    }
-
-    private void js(final String code) {
-        ui.post(new Runnable() {
-            public void run() {
-                try {
-                    if (web != null) web.evaluateJavascript(code, null);
-                } catch (Throwable ignored) {
-                }
-            }
-        });
-    }
-
-    private JSONObject card(String title, String note) throws Exception {
-        JSONObject o = new JSONObject();
-        o.put("title", title == null ? "\u8bbe\u7f6e" : title);
-        JSONArray bs = new JSONArray();
-        JSONObject c = new JSONObject();
-        c.put("kind", "card");
-        if (note != null && note.length() > 0) c.put("note", note);
-        bs.put(c);
-        o.put("blocks", bs);
-        return o;
-    }
-
-    private static final String SHELL =
-            "<!doctype html><html><head><meta charset='utf-8'>"
-            + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            + "<style>"
-            + "*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}"
-            + "html,body{margin:0;height:100%;background:#fff;color:#1c1c1e;font:15px/1.5 -apple-system,Roboto,'Noto Sans SC',sans-serif}"
-            + "#wrap{display:flex;height:100%}"
-            + "#side{width:31%;max-width:166px;min-width:110px;background:#f7f7f8;border-right:1px solid #e7e7ea;overflow:auto;padding:10px 6px}"
-            + ".item{padding:11px 10px;border-radius:10px;font-size:13.5px;margin-bottom:2px}"
-            + ".item.on{background:#e8e8ec;font-weight:600}"
-            + "#main{flex:1;overflow:auto;padding:14px 12px 40px}"
-            + "h1{font-size:18px;margin:2px 0 4px}"
-            + ".sub{color:#6b6b70;font-size:12.5px;margin-bottom:12px;line-height:1.5}"
-            + ".card{background:#fbfbfc;border:1px solid #e7e7ea;border-radius:12px;padding:12px;margin-bottom:12px}"
-            + ".ct{font-size:13.5px;font-weight:600;margin-bottom:6px}"
-            + ".row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:8px 0;font-size:13.5px}"
-            + ".k{color:#6b6b70;width:58px;flex:none;font-size:12.5px}"
-            + ".v{flex:1 1 116px;min-width:116px;word-break:break-all;overflow-wrap:anywhere}"
-            + ".note{color:#9a9aa0;font-size:12px;margin-top:8px;line-height:1.5}"
-            + "button{font-size:12.5px;padding:5px 11px;border-radius:9px;border:1px solid #e7e7ea;background:#fff;color:#1c1c1e;flex:none}"
-            + ".badge{color:#12a150;font-size:12px;margin-left:6px}"
-            + ".svg{width:170px;height:170px;margin:8px auto 0}.svg svg{width:100%;height:100%}"
-            + "</style></head><body><div id='wrap'><div id='side'></div><div id='main'></div></div><script>"
-            + "function $(i){return document.getElementById(i)}"
-            + "function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return c=='&'?'&amp;':(c=='<'?'&lt;':'&gt;')})}"
-            + "function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}"
-            + "function renderSide(list,cur){window.cur=cur;var b=$('side');b.innerHTML='';list.forEach(function(s){var d=el('div','item'+(s.id===cur?' on':''),s.label);d.onclick=function(){if(window.cur===s.id)return;window.cur=s.id;renderSide(list,s.id);show({title:s.label,blocks:[{note:'\u8bfb\u53d6\u4e2d\u2026'}]});dshNative.section(s.id)};b.appendChild(d)})}"
-            + "function show(p){var m=$('main');m.innerHTML='';m.appendChild(el('h1',null,p.title||'\u8bbe\u7f6e'));if(p.subtitle)m.appendChild(el('div','sub',p.subtitle));(p.blocks||[]).forEach(function(k){m.appendChild(card(k))})}"
-            + "function card(k){var c=el('div','card');if(k.title)c.appendChild(el('div','ct',k.title));if(k.text)c.appendChild(el('div','sub',k.text));(k.rows||[]).forEach(function(r){c.appendChild(line(r))});if(k.svg){var w=el('div','svg');w.innerHTML=k.svg;c.appendChild(w)}if(k.note)c.appendChild(el('div','note',k.note));return c}"
-            + "function line(r){var d=el('div','row');d.appendChild(el('div','k',r.k));var v=el('div','v');v.appendChild(el('span',null,r.v));if(r.badge)v.appendChild(el('span','badge','\u25cf '+(r.badge||'')));d.appendChild(v);(r.btns||[]).forEach(function(x){var t=el('button',null,x.label);t.onclick=function(){dshNative.act(window.cur||'devctl',x.action,x.arg||'')};d.appendChild(t)});return d}"
-            + "</script></body></html>";
 }

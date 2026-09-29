@@ -14,6 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
 import { svg as qrSvg } from './qr.js'
+import { DEFAULT_WEB_PORT, installRemoteWeb } from './remote-web.js'
 
 const VERSION = '1.2.1'
 const PROTOCOL = 1
@@ -73,6 +74,11 @@ export function apply(ctx, config) {
   const settings = config ?? {}
   const host = typeof settings.host === 'string' && settings.host.length > 0 ? settings.host : DEFAULT_HOST
   const port = Number.isInteger(settings.port) && settings.port >= 0 && settings.port <= 65535 ? settings.port : DEFAULT_PORT
+  // LAN window onto the Host web UI, so a paired phone can show the real
+  // settings page (and with it every plugin's own section) without a browser
+  // token. `web.port = 0` turns it off; `web.target` pins the loopback origin.
+  const webPort = Number.isInteger(settings.web?.port) ? settings.web.port : DEFAULT_WEB_PORT
+  const webTarget = typeof settings.web?.target === 'string' ? settings.web.target : ''
 
   const stateDir = process.env.DSH_HOME && process.env.DSH_HOME.length > 0 ? process.env.DSH_HOME : join(homedir(), '.dsh')
   const stateFile = join(stateDir, STATE_NAME)
@@ -205,6 +211,19 @@ export function apply(ctx, config) {
         server.close(() => resolve())
       })
   }, 'devctl-dsh.listen')
+
+  ctx.effect(() => {
+    const lanWeb = installRemoteWeb({
+      port: webPort,
+      token,
+      target: webTarget,
+      statusPath: STATUS_PATH,
+      log,
+      warn,
+    })
+    if (!lanWeb) return () => {}
+    return () => lanWeb.dispose()
+  }, 'devctl-dsh.web-window')
 
   installSettingsRoutes(ctx, bridge)
   refreshClientBundleGraph(ctx)
