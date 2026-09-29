@@ -59,7 +59,41 @@ public class TabChat extends Tab {
         box.addView(st);
 
         cv = new ChatView(act);
-        box.addView(cv, new LinearLayout.LayoutParams(
+        final android.widget.TextView jump = new android.widget.TextView(act);   // 右下角下箭头
+        jump.setText("\u2193");
+        jump.setTextSize(18);
+        jump.setTextColor(Ui.TEXT);
+        jump.setGravity(android.view.Gravity.CENTER);
+        jump.setElevation(Ui.dp(act, 6));
+        android.graphics.drawable.GradientDrawable jbg =
+                new android.graphics.drawable.GradientDrawable();                // 暗色圆底，不抢内容
+        jbg.setColor(Ui.SURF3);
+        jbg.setCornerRadius(Ui.dp(act, 20));
+        jump.setBackground(jbg);
+        jump.setVisibility(android.view.View.GONE);                              // 贴在底部时不出现
+        jump.setOnClickListener(new android.view.View.OnClickListener() {
+            public void onClick(android.view.View v) {
+                cv.jumpToBottom();
+            }
+        });
+
+        android.widget.FrameLayout cvWrap = new android.widget.FrameLayout(act);
+        cvWrap.addView(cv, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        android.widget.FrameLayout.LayoutParams jlp = new android.widget.FrameLayout.LayoutParams(
+                Ui.dp(act, 40), Ui.dp(act, 40),
+                android.view.Gravity.BOTTOM | android.view.Gravity.END);
+        jlp.rightMargin = Ui.dp(act, 16);
+        jlp.bottomMargin = Ui.dp(act, 16);
+        cvWrap.addView(jump, jlp);
+        cv.setFollowCb(new Runnable() {
+            public void run() {
+                jump.setVisibility(cv.isFollowing()
+                        ? android.view.View.GONE : android.view.View.VISIBLE);
+            }
+        });
+        box.addView(cvWrap, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
