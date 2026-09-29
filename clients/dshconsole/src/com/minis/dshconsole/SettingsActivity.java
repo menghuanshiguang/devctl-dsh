@@ -155,10 +155,6 @@ public class SettingsActivity extends Activity {
             });
             modeCard.addView(cfg);
         }
-        LinearLayout wrap = Ui.col(this);
-        wrap.addView(modeCard, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        wrap.addView(Ui.gap(this, 6));
     }
 
     private TextView chip(String text, boolean on, final Runnable cb) {
@@ -251,8 +247,8 @@ public class SettingsActivity extends Activity {
 
     private void fill(String[] ids, String[] labels) {
         if (list == null) return;
-        rebuildModeCard();                 // 只重画模式卡，分区行从它下面开始重排
-        while (list.getChildCount() > 3) list.removeViewAt(3);
+        rebuildModeCard();                 // 只重画模式卡，分区行从它下面（第 4 个孩子）开始重排
+        while (list.getChildCount() > 4) list.removeViewAt(4);
         for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i], i));
         list.addView(Ui.gap(this, 10));
     }
