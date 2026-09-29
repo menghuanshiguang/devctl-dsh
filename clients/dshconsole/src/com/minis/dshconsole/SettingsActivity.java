@@ -66,6 +66,10 @@ public class SettingsActivity extends Activity {
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
         list = Ui.col(this);
+        list.addView(modeCard());          // 运行模式：协议头指向远端还是本机
+        list.addView(Ui.gap(this, 10));
+        list.addView(Ui.tv(this, "DSH 原版设置（二级页）", 12f, Ui.MUT));
+        list.addView(Ui.gap(this, 6));
         sc.addView(list, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         col.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -100,6 +104,127 @@ public class SettingsActivity extends Activity {
         return wrap;
     }
 
+    // ==================== 运行模式：远端（局域网 PC）/ 本地（这台手机上的 harness） ====================
+
+    private LinearLayout modeCard;
+
+    /** 两枚胶囊 + 一行说明：远端 走局域网那台；本地 走本机回环，协议一模一样。 */
+    private View modeCard() {
+        modeCard = Ui.col(this);
+        rebuildModeCard();
+        return modeCard;
+    }
+
+    private void rebuildModeCard() {
+        if (modeCard == null) return;
+        modeCard.removeAllViews();
+        boolean local = MainActivity.MODE_LOCAL.equals(store.get("runMode", MainActivity.MODE_REMOTE));
+
+        LinearLayout head = Ui.row(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(Ui.tv(this, "运行模式", 15.5f, Ui.TEXT),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        head.addView(chip("远端", !local, new Runnable() {
+            public void run() {
+                store.set("runMode", MainActivity.MODE_REMOTE);
+                rebuildModeCard();
+            }
+        }));
+        head.addView(chip("本地", local, new Runnable() {
+            public void run() {
+                store.set("runMode", MainActivity.MODE_LOCAL);
+                rebuildModeCard();
+            }
+        }));
+        modeCard.addView(head);
+
+        String host = store.get("local:host", "127.0.0.1");
+        String port = store.get("local:port", "7788");
+        String tok = store.get("local:token", "");
+        String line = local
+                ? "本地 · " + host + ":" + port + (tok.length() > 0 ? " · 已配令牌" : " · 还没配令牌")
+                : "远端 · " + (dev == null || dev.addr().length() == 0 ? "未配对" : dev.addr());
+        modeCard.addView(Ui.tv(this, line, 12f, local ? Ui.AMBER : Ui.MUT));
+        if (local) {
+            TextView cfg = Ui.tv(this, "本机地址 / 令牌…", 12f, Ui.ACCENT);
+            cfg.setPadding(0, Ui.dp(this, 6), 0, 0);
+            cfg.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    editLocal();
+                }
+            });
+            modeCard.addView(cfg);
+        }
+        LinearLayout wrap = Ui.col(this);
+        wrap.addView(modeCard, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        wrap.addView(Ui.gap(this, 6));
+    }
+
+    private TextView chip(String text, boolean on, final Runnable cb) {
+        final TextView t = Ui.tv(this, text, 12.5f, on ? 0xFF0E1116 : Ui.TEXT);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(Ui.dp(this, 12), Ui.dp(this, 5), Ui.dp(this, 12), Ui.dp(this, 5));
+        t.setBackground(on ? Ui.bg(Ui.ACCENT, 14, this) : Ui.bg(Ui.SURF2, 14, this, Ui.STROKE, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = Ui.dp(this, 6);
+        t.setLayoutParams(lp);
+        t.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (cb != null) cb.run();
+            }
+        });
+        return t;
+    }
+
+    /** 本地模式的三件套：地址、端口、令牌（本地 harness 起在手机上时用它）。 */
+    private void editLocal() {
+        LinearLayout box = Ui.col(this);
+        int p = Ui.dp(this, 16);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        final android.widget.EditText h = field(store.get("local:host", "127.0.0.1"), "地址");
+        final android.widget.EditText pt = field(store.get("local:port", "7788"), "端口");
+        final android.widget.EditText tk = field(store.get("local:token", ""), "令牌");
+        box.addView(h);
+        box.addView(pt);
+        box.addView(tk);
+        box.addView(Ui.tv(this, "令牌在本地 harness 的 $DSH_HOME/devctl-dsh.json 里", 11.5f, Ui.MUT));
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("本地 harness")
+                .setView(box)
+                .setPositiveButton("保存", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        store.set("local:host", h.getText().toString().trim());
+                        store.set("local:port", pt.getText().toString().trim());
+                        store.set("local:token", tk.getText().toString().trim());
+                        rebuildModeCard();
+                        Toast.makeText(SettingsActivity.this, "已保存 · 回主界面会自动重连",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private android.widget.EditText field(String value, String hint) {
+        android.widget.EditText e = new android.widget.EditText(this);
+        e.setText(value);
+        e.setHint(hint);
+        e.setTextSize(14f);
+        e.setSingleLine(true);
+        e.setTextColor(Ui.TEXT);
+        e.setHintTextColor(Ui.MUT);
+        e.setBackground(Ui.bg(Ui.SURF2, 10, this, Ui.STROKE, 1));
+        int p = Ui.dp(this, 10);
+        e.setPadding(p, Ui.dp(this, 8), p, Ui.dp(this, 8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = Ui.dp(this, 8);
+        e.setLayoutParams(lp);
+        return e;
+    }
+
     /** 一行分区下面的说明：能拿实时值就给实时值，别让用户点进去才知道自己连的是哪台。 */
     private String hint(String id) {
         if ("devctl".equals(id)) {
@@ -126,7 +251,8 @@ public class SettingsActivity extends Activity {
 
     private void fill(String[] ids, String[] labels) {
         if (list == null) return;
-        list.removeAllViews();
+        rebuildModeCard();                 // 只重画模式卡，分区行从它下面开始重排
+        while (list.getChildCount() > 3) list.removeViewAt(3);
         for (int i = 0; i < ids.length; i++) list.addView(item(ids[i], labels[i], i));
         list.addView(Ui.gap(this, 10));
     }

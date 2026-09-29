@@ -32,6 +32,8 @@ public class MainActivity extends Activity {
     private LinearLayout side;
     private View scrim;
     private TextView title;
+    private TextView modeBadge;
+    private String lastMode = "";
     private TextView status;
     private Spinner devSpin; // 兼容旧代码，实际不再显示
 
@@ -58,6 +60,7 @@ public class MainActivity extends Activity {
                     android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         }
         store = new Store(this);
+        lastMode = localMode() ? MODE_LOCAL : MODE_REMOTE;
         List<Store.Dev> list = store.devices("dsh");
         if (list.isEmpty()) {
             Store.Dev d = new Store.Dev();
@@ -116,6 +119,21 @@ public class MainActivity extends Activity {
             }
         });
         bar.addView(menu);
+
+        modeBadge = Ui.tv(this, "远端", 11.5f, Ui.MUT);      // 一眼看出协议头指向谁
+        modeBadge.setGravity(Gravity.CENTER);
+        modeBadge.setPadding(Ui.dp(this, 9), Ui.dp(this, 4), Ui.dp(this, 9), Ui.dp(this, 4));
+        modeBadge.setBackground(Ui.bg(Ui.SURF2, 12, this, Ui.STROKE, 1));
+        Ui.press(modeBadge, this, Ui.SURF3, 12);
+        modeBadge.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                startActivity(new android.content.Intent(MainActivity.this, SettingsActivity.class));
+            }
+        });
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        blp.rightMargin = Ui.dp(this, 8);
+        bar.addView(modeBadge, blp);
 
         LinearLayout mid = Ui.col(this);
         mid.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 4), 0);
@@ -442,6 +460,12 @@ public class MainActivity extends Activity {
 
     /** 选图 / 拍照的结果转给聊天页（TabChat 自己发起的选择器）。 */
     @Override
+    protected void onResume() {
+        super.onResume();
+        syncModeUi();                 // 从设置页回来时模式可能变了
+    }
+
+    @Override
     protected void onActivityResult(int req, int res, android.content.Intent data) {
         super.onActivityResult(req, res, data);
         if (req == 4711 && res == RESULT_OK && tabChat instanceof TabChat) {
@@ -466,8 +490,77 @@ public class MainActivity extends Activity {
     }
 
     /** 开一条独立连接（长驻事件流用，避免和 request/response 抢读）。 */
+    // ==================== 运行模式：远端（局域网 PC）/ 本地（这台手机上的 harness） ====================
+
+    public static final String MODE_REMOTE = "remote";
+    public static final String MODE_LOCAL = "local";
+
+    /** 当前运行模式。持久化在 store 里，切一次就记住。 */
+    public boolean localMode() {
+        return MODE_LOCAL.equals(store.get("runMode", MODE_REMOTE));
+    }
+
+    public void setLocalMode(boolean local) {
+        store.set("runMode", local ? MODE_LOCAL : MODE_REMOTE);
+        syncModeUi();                       // 顶栏/侧栏的模式标记跟着变
+    }
+
+    /** 本地模式的地址：本机回环 + 端口，令牌单独存（本地 harness 起在自己身上）。 */
+    public Store.Dev localDev() {
+        Store.Dev d = new Store.Dev();
+        d.name = "local";
+        d.host = store.get("local:host", "127.0.0.1");
+        try {
+            d.port = Integer.parseInt(store.get("local:port", "7788"));
+        } catch (Throwable ignored) {
+            d.port = 7788;
+        }
+        d.token = store.get("local:token", "");
+        return d;
+    }
+
+    /** 协议头指向谁：本地模式指回本机，远端模式还是原来那台。 */
+    public Store.Dev activeDev() {
+        if (localMode()) return localDev();
+        return store.find("dsh", dshName);
+    }
+
+    /** 顶栏上的模式徽章：一眼看出协议头指向谁，点一下进设置切。 */
+    public void syncModeUi() {
+        if (modeBadge != null) {
+            boolean local = localMode();
+            boolean changed = !lastMode.equals(local ? MODE_LOCAL : MODE_REMOTE);
+            lastMode = local ? MODE_LOCAL : MODE_REMOTE;
+            modeBadge.setText(local ? "本地" : "远端");
+            modeBadge.setTextColor(local ? Ui.AMBER : Ui.MUT);
+            if (changed) {
+                // 模式换了：原来那条连接指向别处了，重连一次
+                bg(new Runnable() {
+                    public void run() {
+                        try {
+                            Dsh c = openDsh(8000);
+                            c.close();
+                            ui(new Runnable() {
+                                public void run() {
+                                    setStatus("模式已切换，重新连接…", Ui.AMBER);
+                                    connectDsh(false);
+                                }
+                            });
+                        } catch (final Exception e) {
+                            ui(new Runnable() {
+                                public void run() {
+                                    setStatus("切不过去：" + e.getMessage(), Ui.RED);
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     public Dsh openDsh(int timeoutMs) throws Exception {
-        Store.Dev dev = store.find("dsh", dshName);
+        Store.Dev dev = activeDev();
         if (dev == null) throw new Exception("未配置 DSH 设备");
         return Dsh.open(dev, timeoutMs, "dshconsole/1.0", "Android " + Build.VERSION.RELEASE);
     }
