@@ -62,6 +62,39 @@ public class TabChat extends Tab {
     }
 
     /** 审批 / 提问卡上的按钮：点一下就发一条一次性 RPC 回 host。 */
+    /** 调试用：画一张样例提问卡/审批卡（--ez fakeCard question|approval），验 UI 不用等真事件。 */
+    private void fakeCard() {
+        android.content.Intent it = act.getIntent();
+        if (it == null) return;
+        final String what = it.getStringExtra("fakeCard");
+        if (what == null) return;
+        act.ui(new Runnable() {
+            public void run() {
+                if ("approval".equals(what)) {
+                    cv.approval("fake-1", "bash", "要跑 rm -rf /tmp/x（样例）");
+                } else {
+                    try {
+                        JSONArray qs = new JSONArray();
+                        JSONObject q = new JSONObject();
+                        q.put("id", "q1");
+                        q.put("header", "测试");
+                        q.put("question", "这条消息你觉得该怎么回？（样例）");
+                        JSONArray opts = new JSONArray();
+                        for (String label : new String[]{"直接回", "先别回", "让我想想"}) {
+                            JSONObject o = new JSONObject();
+                            o.put("label", label);
+                            opts.put(o);
+                        }
+                        q.put("options", opts);
+                        qs.put(q);
+                        cv.question("fake-q", qs);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        });
+    }
+
     private void wireInteractiveCards() {
         cv.setApprovalCb(new ChatView.ApprovalCb() {
             public void onDecide(final String id, final boolean allow) {
@@ -437,6 +470,7 @@ public class TabChat extends Tab {
         outer.addView(card);
         box.addView(outer);
         pageBox = box;                       // 整页容器：IME 动画作用在它身上（MainActivity 回调进来）
+        fakeCard();                          // 调试入口（只在带 extra 时生效）
         return box;
     }
 
@@ -1443,6 +1477,9 @@ public class TabChat extends Tab {
             });
             return;
         }
+        if ("approval".equals(event) || "question".equals(event)) {
+            android.util.Log.i("DshCard", "收到 " + event + " 事件: " + data);
+        }
         if ("approval".equals(event)) {
             final String id = data.optString("id", "");
             final String tool = data.optString("toolName", data.optString("name", ""));
@@ -1798,8 +1835,17 @@ public class TabChat extends Tab {
         char c = s.charAt(0);
         if (c == '<' || c == '[' || c == '{') return true;
         String low = s.toLowerCase();
-        return low.startsWith("cwd:") || low.startsWith("runtime")
-                || low.indexOf("\ncwd:") >= 0 || low.indexOf("<runtime") >= 0;
+        if (low.startsWith("cwd:") || low.startsWith("runtime")
+                || low.indexOf("\ncwd:") >= 0 || low.indexOf("<runtime") >= 0) {
+            return true;
+        }
+        // DSH 往会话里塞的运行期上下文有一批固定话术（截图里那种整屏大段的就是它）
+        return low.indexOf("runtime context") >= 0
+                || low.indexOf("file policy") >= 0
+                || low.indexOf("approval requests are auto-granted") >= 0
+                || low.indexOf("approval policy") >= 0
+                || low.indexOf("sandbox") >= 0 && low.indexOf("dsH file".toLowerCase()) >= 0
+                || low.startsWith("current dsh");
     }
 
     /**

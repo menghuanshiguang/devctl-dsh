@@ -20,7 +20,22 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="dshconsole" />
+            </intent-filter>
         </activity>
+        <activity
+            android:name=".LocalSetupActivity"
+            android:exported="false"
+            android:label="启用本地版" />
         <activity
             android:name=".SettingsActivity"
             android:exported="false"

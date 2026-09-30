@@ -71,6 +71,15 @@ def build_manifest():
                 if v is not None and v.startswith("."):
                     node.set(key, "com.minis.dshconsole" + v)
         tree.getroot().set("package", PKGS[FLAVOR])
+    if FLAVOR == "local":
+        # 本地版要在 app 私有目录里跑一个 Linux 用户态（rootfs 里的 ELF 得能 execve）。
+        # Android 10 起，targetSdk>=29 的 app 执行自己数据目录里的文件会被 SELinux 拒掉
+        # （proot 报的就是 "loader was not found"）。Termux/UserLAnd 这类能跑发行版的做法，
+        # 就是 targetSdk 停在 28；这里只对本地版这么做，远端版仍是 34。
+        for node in tree.iter():
+            if node.tag.endswith("uses-sdk"):
+                node.set("{%s}targetSdkVersion" % ANDROID_NS, "28")
+                print("[manifest] local 版 targetSdkVersion=28（允许 exec app 私有目录）")
     for node in tree.iter():
         key = "{%s}label" % ANDROID_NS
         if node.get(key) == "DSH 控制台":

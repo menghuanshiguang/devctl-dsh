@@ -17,6 +17,9 @@ public class Store {
         public String name = "";
         public String host = "";
         public int port = 7788;
+        /** 原版设置页（网页）的端口。0 = 用 host 报回来的（局域网下就是 7790）。
+         *  走内网穿透时公网端口跟 7790 不是一回事，必须在这里显式填。 */
+        public int webPort = 0;
         public String token = "";
         /** 证书指纹（devctl TLS TOFU 固定用） */
         public String pin = "";
@@ -25,11 +28,17 @@ public class Store {
             return host + ":" + port;
         }
 
+        /** 设置页（网页窗口）的对外地址：穿透模式下用 webPort。 */
+        public int webAddr() {
+            return webPort > 0 ? webPort : 7790;
+        }
+
         public JSONObject toJson() throws Exception {
             JSONObject o = new JSONObject();
             o.put("name", name);
             o.put("host", host);
             o.put("port", port);
+            o.put("webPort", webPort);
             o.put("token", token);
             o.put("pin", pin);
             return o;
@@ -40,6 +49,7 @@ public class Store {
             d.name = o.optString("name");
             d.host = o.optString("host");
             d.port = o.optInt("port", 7788);
+            d.webPort = o.optInt("webPort", 0);
             d.token = o.optString("token");
             d.pin = o.optString("pin");
             return d;

@@ -175,20 +175,122 @@ public class ChatView extends ScrollView {
         spacer(Ui.S4);
         curRaw = "";
         cur = plainBody("", Ui.TEXT);
+        // 必须是 Spannable，否则第一次 append 前 getText() 只是个 String，淡入 span 加不上去
+        cur.setText(new android.text.SpannableStringBuilder(""), android.widget.TextView.BufferType.SPANNABLE);
+        cur.addOnLayoutChangeListener(bodyGrow);
         col.addView(cur, fullLp());
         copySrc = new String[]{""};
         col.addView(copyBar(copySrc), fullLp());   // 复制按钮跟着正文一起长
         scroll(true);
     }
 
+    /**
+     * 流式追加：**只解析这一小段**再 append。
+     * 以前是每来一个字就 `setText(md(全文))` —— 长文本下等于每帧重排整篇（抖得很厉害 ✗），
+     * 而且 setText 会把刚加上的淡入 span 一起冲掉（所以"没有任何动画" ✗）。
+     * 整篇 markdown 留到 botEnd 再统一排一次（richBody 也是那时候才上的）。
+     */
     public void append(String chunk) {
         if (chunk == null || chunk.length() == 0) return;
         if (cur == null) botStart();
         curRaw += chunk;
         if (copySrc != null) copySrc[0] = curRaw;
-        cur.setText(md(curRaw + CURSOR));
-        markLinks(cur, curRaw);
-        scroll(false);
+        int start = cur.length();
+        cur.append(chunk);                     // 只追加、**不解析**：字符只增不改 → 永不重排 ✗抖
+        int end = cur.length();
+        fadeRange(cur, start, end);            // 刚到的这段淡入
+        followBottom();                        // 帧对齐、瞬时贴底（不跑滚动动画）
+    }
+
+    /* ============================================================
+     * 流式跟底：**按帧对齐 + 瞬时 scrollTo**。
+     *
+     * 以前走的是 scroll(false) → 节流 100ms → postDelayed(40) → smoothScrollTo()。
+     * smoothScrollTo 本身是一段 ~250ms 的滚动动画；流式时内容每几十毫秒就长一截，
+     * 于是"动画还没跑完就被下一个 chunk 打断 → 从当前位置重新起一段动画"，
+     * 一秒钟重启十几次 —— 这就是**长文本抖得厉害**的真凶（文本越长越明显）。
+     *
+     * 官方那种"丝滑"的本质很简单：跟随是**瞬时**的（Compose 里就是 scrollBy 一帧一次），
+     * 视口每帧钉在当帧结算后的底部，视觉上就是内容平滑往上流。
+     * ============================================================ */
+    private void followBottom() {
+        if (quiet || !following) {
+            return;
+        }
+        int y = bottomY();
+        if (y > getScrollY()) {
+            scrollTo(0, y);
+        }
+    }
+
+    /**
+     * 正文高度一变，**在 layout 回调里立刻贴底**。
+     *
+     * 这一步的时机是关键（"复制按钮一直闪"就是时机错了）：
+     * `postOnAnimation` 的回调跑在**帧流程的 animation 阶段，早于 measure/layout**，
+     * 那时 `col.getHeight()` 还是**旧值** → 滚到旧底部；可这一帧稍后 layout 完，内容又长高了
+     * → 视口和内容错开一截 → 下一帧才追、又错一截 …… 于是画面元素（尤其是靠下的按钮）
+     * 一直在"错开-追上"之间抽动，看着就是**闪**。
+     *
+     * 而 `OnLayoutChangeListener` 是在 `layout()` 里 `setFrame` + `onLayout` **之后**回调的：
+     * 此刻高度已经是新的，同一帧的 draw 立刻用上新的滚动位置 —— 高度增长和视口跟随
+     * **在同一帧内完成**，中间没有任何一帧是错位的。这就是"丝滑"的全部秘密。
+     */
+    private final View.OnLayoutChangeListener bodyGrow = new View.OnLayoutChangeListener() {
+        public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int orr, int ob) {
+            if (b - t != ob - ot) {            // 只有高度真的变了才贴底（同一行内多几个字不用管）
+                followBottom();
+            }
+        }
+    };
+
+    // ---- 流式尾巴淡入：字符"啪"地蹦出来很扎眼，给新到的几个字一层短促渐显 ----
+
+    /** 可改颜色的 span（平台的 ForegroundColorSpan 不给改，做不了逐帧淡入）。 */
+    static class AlphaColor extends android.text.style.CharacterStyle {
+        int color;
+
+        AlphaColor(int c) {
+            color = c;
+        }
+
+        @Override
+        public void updateDrawState(android.text.TextPaint tp) {
+            tp.setColor(color);
+        }
+    }
+
+    private void fadeRange(TextView tv, int start, int end) {
+        CharSequence cs = tv.getText();
+        if (!(cs instanceof android.text.Spannable)) return;
+        final android.text.Spannable sp = (android.text.Spannable) cs;
+        if (end <= start || end > sp.length()) return;
+        if (end - start > 900) return;         // 整段历史灌进来就别淡了
+        // 注意：**不再掐断上一段**。以前是一来新 chunk 就把旧动画 cancel + 摘掉 span，
+        // 段落间一二十毫秒就来一次 → 每段都只淡了半截就被抹平 → 看着"根本没有动画" ✗
+        final AlphaColor span = new AlphaColor((0x0C << 24) | (Ui.TEXT & 0x00FFFFFF));
+        sp.setSpan(span, start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        final android.animation.ValueAnimator a =
+                android.animation.ValueAnimator.ofInt(0x0C, 0xFF);
+        a.setDuration(end - start > 40 ? 200 : 130);
+        a.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator an) {
+                int alpha = (Integer) an.getAnimatedValue();
+                int base = Ui.TEXT;
+                span.color = (alpha << 24) | (base & 0x00FFFFFF);
+                tv.invalidate();
+            }
+        });
+        a.addListener(new android.animation.AnimatorListenerAdapter() {
+            public void onAnimationEnd(android.animation.Animator an) {
+                try {
+                    sp.removeSpan(span);      // 淡完就把这层剥掉，免得和后面加的链接色打架
+                } catch (Throwable ignored) {
+                }
+                tv.invalidate();
+            }
+        });
+        a.start();
     }
 
     public void botEnd() {
@@ -244,7 +346,8 @@ public class ChatView extends ScrollView {
     private long thinkHeadAt;                 // 标题文字节流：流式期间别每帧 setText，否则点击会被取消
 
     private boolean following = true;         // 用户是否贴在底部；一旦翻上去就不再抢位置
-    private long ignoreScrollUntil;           // 程序化滚动后的短暂静默期，免得把自己的滚动误判成用户操作
+    private long ignoreScrollUntil;           // 程序化滚动后的短暂静默期（老逻辑，仍给非流式场景用）
+    private boolean userTouch;                // 手指是否按在列表上（区分"人滚的"和"程序滚的"）
     private Runnable followCb;                // 跟随状态变化回调（给右下角下箭头用）
 
     /** 由外部（TabChat）接管右下角下箭头的显示/隐藏。 */
@@ -291,9 +394,23 @@ public class ChatView extends ScrollView {
     }
 
     @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        int a = e.getActionMasked();
+        if (a == android.view.MotionEvent.ACTION_DOWN) {
+            userTouch = true;
+        } else if (a == android.view.MotionEvent.ACTION_UP || a == android.view.MotionEvent.ACTION_CANCEL) {
+            userTouch = false;
+        }
+        return super.dispatchTouchEvent(e);
+    }
+
+    @Override
     protected void onScrollChanged(int l, int t, int oldl, int oldt) {
         super.onScrollChanged(l, t, oldl, oldt);
-        if (System.currentTimeMillis() < ignoreScrollUntil) return;   // 自己滚的不算
+        // 只有"手指按着时的滚动"才算用户操作。
+        // 以前是靠 ignoreScrollUntil 的时间窗来排除程序化滚动 —— 流式时每帧都在滚，
+        // 时间窗被无限续命，用户中途上滑会被当成"自己的滚动"吃掉。
+        if (!userTouch) return;
         setFollowing(atBottom());
     }
 
@@ -2234,13 +2351,9 @@ public class ChatView extends ScrollView {
                 boolean sm = scrollSmooth;
                 scrollQueued = false;
                 scrollSmooth = false;
-                int y = Math.max(0, col.getHeight() + getPaddingTop() + getPaddingBottom() - getHeight());
                 ignoreScrollUntil = System.currentTimeMillis() + 150;   // 自己滚的，别当成用户操作
-                if (sm) {
-                    smoothScrollTo(0, y);
-                } else {
-                    scrollTo(0, y);
-                }
+                scrollToBottom(true);                                   // 新消息一律"滑"下去
+
             }
         }, 40);
     }
@@ -2256,27 +2369,97 @@ public class ChatView extends ScrollView {
         postDelayed(new Runnable() {
             public void run() {
                 ignoreScrollUntil = System.currentTimeMillis() + 150;
-                scrollTo(0, bottomY());
+                scrollToBottom(true);
             }
         }, 60);
         postDelayed(new Runnable() {
             public void run() {
-                int y = bottomY();
-                if (getScrollY() < y - 2) {          // 长文本/图片结算晚，差一点就再补
+                if (getScrollY() < bottomY() - 40) {   // 长文本结算晚，差得多才补（差一点点就算了，免得抖）
                     ignoreScrollUntil = System.currentTimeMillis() + 150;
-                    scrollTo(0, y);
+                    scrollToBottom(true);
                 }
             }
         }, 320);
         postDelayed(new Runnable() {
             public void run() {
-                int y = bottomY();
-                if (getScrollY() < y - 2) {          // 复制行/图片结算更晚，再补一枪
+                if (getScrollY() < bottomY() - 40) {   // 图片/复制行结算更晚，再补一次
                     ignoreScrollUntil = System.currentTimeMillis() + 150;
-                    scrollTo(0, y);
+                    scrollToBottom(true);
                 }
             }
         }, 900);
+    }
+
+    /**
+     * 滚到底：**默认带动画**（新消息是"滑"下去的，不是啪一下跳到底）。
+     * 只有跨度特别大（比如刚打开几百条历史）才直接跳 —— 那种情况动画反而更晕。
+     */
+    private void scrollToBottom(boolean animate) {
+        int y = bottomY();
+        int cur = getScrollY();
+        if (y <= cur + 1) {
+            return;
+        }
+        if (!animate || y - cur > Math.max(1200, getHeight() * 3)) {
+            scrollTo(0, y);
+        } else {
+            smoothScrollTo(0, y);
+        }
+    }
+
+    /**
+     * 高度 0 ↔ 自然 的展开/收起动画（+ 淡入淡出）。
+     * 完事把 height 交回 WRAP_CONTENT，之后内容再长也不会被定死。
+     */
+    private void animHeight(final View v, final boolean expand) {
+        if (v == null) return;
+        int from = v.getHeight();
+        if (expand) {
+            v.setVisibility(View.VISIBLE);
+            v.measure(android.view.View.MeasureSpec.makeMeasureSpec(
+                            Math.max(1, getWidth()), android.view.View.MeasureSpec.AT_MOST),
+                    android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED));
+            int natural = Math.max(1, v.getMeasuredHeight());
+            v.getLayoutParams().height = 0;
+            v.requestLayout();
+            from = 0;
+            animateTo(v, 0, natural);
+        } else {
+            if (from <= 0) {
+                v.setVisibility(View.GONE);
+                return;
+            }
+            animateTo(v, from, 0);
+        }
+    }
+
+    private void animateTo(final View v, int from, final int to) {
+        android.animation.ValueAnimator a = android.animation.ValueAnimator.ofInt(from, to);
+        a.setDuration(200);
+        a.setInterpolator(to > from ? new android.view.animation.DecelerateInterpolator()
+                                    : new android.view.animation.AccelerateInterpolator());
+        a.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator an) {
+                int h = (Integer) an.getAnimatedValue();
+                android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+                lp.height = h;
+                v.setLayoutParams(lp);
+                float span = Math.max(1, to > 0 ? to : from);
+                v.setAlpha(to > 0 ? Math.min(1f, h / span) : Math.max(0f, h / span));
+                if (following) scrollToBottom(false);      // 展开/收起时把底部跟着带上，避免内容跑到屏幕外
+            }
+        });
+        a.addListener(new android.animation.AnimatorListenerAdapter() {
+            public void onAnimationEnd(android.animation.Animator an) {
+                android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+                lp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                v.setLayoutParams(lp);
+                v.setAlpha(1f);
+                if (to == 0) v.setVisibility(View.GONE);
+                scrollToBottom(true);                       // 收尾平滑贴底
+            }
+        });
+        a.start();
     }
 
     /** 内容真实底部：列高 + 上下内边距 − 视口高（少算 padding 就会差一截）。 */
@@ -2538,8 +2721,7 @@ public class ChatView extends ScrollView {
             headerRow.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     open = !open;
-                    body.setVisibility(open ? View.VISIBLE : View.GONE);
-                    if (bodyWrap != null) bodyWrap.setVisibility(open ? View.VISIBLE : View.GONE);
+                    animHeight(bodyWrap != null ? bodyWrap : body, open);   // 展开/收起带动画
                     if (open) {
                         setFollowing(false);          // 自己在看思考过程：别让流式把外层列表拽走
                         jumpBody();                   // 再展开：回到思考内容最底部（最新流式输出）
@@ -2873,11 +3055,11 @@ public class ChatView extends ScrollView {
                     open = !open;
                     if (open) {
                         full.setText(buf);                   // 展开就是全文（harness 也不截尾）
-                        full.setVisibility(View.VISIBLE);
                         prev.setText("");
                         Ui.stopShimmer(prev);
+                        animHeight(full, true);              // 展开带动画
                     } else {
-                        full.setVisibility(View.GONE);
+                        animHeight(full, false);             // 收起也带动画
                         paint();
                     }
                     toggleInPlace(item);

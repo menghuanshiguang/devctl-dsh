@@ -562,6 +562,8 @@ public class MainActivity extends Activity {
         final EditText port = Ui.input(this, "② 端口，dsh host 默认 7788");
         port.setText("7788");
         port.setInputType(InputType.TYPE_CLASS_NUMBER);
+        final EditText webPort = Ui.input(this, "③ 网页端口（走穿透时填，留空=7790）");
+        webPort.setInputType(InputType.TYPE_CLASS_NUMBER);
         final EditText token = Ui.input(this, "② token（dsh host 状态页可复制）");
         box.addView(paste);
         box.addView(Ui.dim(this, "直接粘贴 host 面板里那条命令即可，自动填好下面全部："));
@@ -569,6 +571,7 @@ public class MainActivity extends Activity {
         box.addView(name);
         box.addView(host);
         box.addView(port);
+        box.addView(webPort);
         box.addView(token);
         new AlertDialog.Builder(this).setTitle("添加 DSH 设备").setView(box)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
@@ -577,6 +580,7 @@ public class MainActivity extends Activity {
                         dev.name = name.getText().toString().trim();
                         dev.host = host.getText().toString().trim();
                         dev.port = parseInt(port.getText().toString().trim(), 7788);
+                        dev.webPort = parseInt(webPort.getText().toString().trim(), 0);
                         dev.token = token.getText().toString().trim();
                         String cmd = paste.getText().toString().trim();
                         if (cmd.length() > 0) {
@@ -667,16 +671,21 @@ public class MainActivity extends Activity {
         final EditText port = Ui.input(this, "端口");
         port.setText(String.valueOf(dev.port));
         port.setInputType(InputType.TYPE_CLASS_NUMBER);
+        final EditText webPort = Ui.input(this, "网页端口（走穿透时填，留空=7790）");
+        webPort.setText(dev.webPort > 0 ? String.valueOf(dev.webPort) : "");
+        webPort.setInputType(InputType.TYPE_CLASS_NUMBER);
         final EditText token = Ui.input(this, "token");
         token.setText(dev.token);
         box.addView(host);
         box.addView(port);
+        box.addView(webPort);
         box.addView(token);
         new AlertDialog.Builder(this).setTitle("编辑 " + dev.name).setView(box)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         dev.host = host.getText().toString().trim();
-                        dev.port = parseInt(port.getText().toString().trim(), 5556);
+                        dev.port = parseInt(port.getText().toString().trim(), 7788);
+                        dev.webPort = parseInt(webPort.getText().toString().trim(), 0);
                         dev.token = token.getText().toString().trim();
                         store.putDevice("dsh", dev);
                         closeDsh();

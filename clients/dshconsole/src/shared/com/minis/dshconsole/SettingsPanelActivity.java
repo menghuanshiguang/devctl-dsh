@@ -155,7 +155,11 @@ public class SettingsPanelActivity extends Activity {
                     } else {
                         int p = w.optInt("port", 0);
                         String url = w.optString("url", "");
-                        if (w.optBoolean("ready", false) && url.length() > 0) base = url;
+                        // 用户显式配了网页端口（内网穿透场景）就优先用它：
+                        // 那时公网端口跟 host 报的 7790 完全不是一回事，照 host 报的拼一定连不上。
+                        if (w.optBoolean("ready", false) && dev.webPort > 0) {
+                            base = "http://" + dev.host + ":" + dev.webPort + "/?token=" + dev.token;
+                        } else if (w.optBoolean("ready", false) && url.length() > 0) base = url;
                         else if (w.optBoolean("ready", false) && p > 0) base = "http://" + dev.host + ":" + p + "/?token=" + dev.token;
                         else why = webReason(w.optString("reason", "")) + webTrace(w);
                     }
@@ -266,7 +270,7 @@ public class SettingsPanelActivity extends Activity {
         String addr = dev == null ? "" : dev.addr();
         int i = addr.lastIndexOf(':');
         String host = i > 0 ? addr.substring(0, i) : addr;
-        return "http://" + host + ":7790";
+        return "http://" + host + ":" + (dev == null ? 7790 : dev.webAddr());
     }
 
     // —— 模式一：直接吃 DSH 原版网页 ——

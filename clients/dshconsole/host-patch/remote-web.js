@@ -14,10 +14,8 @@
  */
 import { createServer as createHttpServer, request as httpRequest } from 'node:http'
 import { connect as tcpConnect } from 'node:net'
-import { networkInterfaces, homedir } from 'node:os'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { timingSafeEqual, createHmac, createHash } from 'node:crypto'
+import { networkInterfaces } from 'node:os'
+import { timingSafeEqual } from 'node:crypto'
 
 /** Default LAN port. Set `web.port` to 0 in the plugin config to switch this off. */
 export const DEFAULT_WEB_PORT = 7790
@@ -45,40 +43,6 @@ function sameToken(a, b) {
   const right = Buffer.from(String(b ?? ''), 'utf8')
   if (left.length !== right.length) return false
   return timingSafeEqual(left, right)
-}
-
-/**
- * Mint the session cookie DSH's own web server expects on the proxy hop.
- *
- * "Loopback needs no launch token" only covers the token exchange: every
- * request still has to carry an authority-bound signed cookie, and a phone only
- * ever holds the devctl token. The signing secret is durable
- * (`.dsh/.credentials.yaml`), so the cookie can be signed here and stamped onto
- * whatever is forwarded upstream. Returns '' when the secret is unavailable,
- * and the proxy then behaves exactly as before.
- */
-function dshSessionCookie(authority) {
-  try {
-    const text = readFileSync(join(homedir(), '.dsh', '.credentials.yaml'), 'utf8')
-    const match = /client-connection\/browser-session:[\s\S]*?secret:\s*([A-Za-z0-9_-]+)/.exec(text)
-    if (!match) return ''
-    const raw = match[1]
-    const secret = Buffer.from(
-      raw.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (raw.length % 4)) % 4),
-      'base64',
-    )
-    if (secret.byteLength !== 32) return ''
-    const b64u = (value) =>
-      Buffer.from(value).toString('base64').replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
-    const issuedAt = Date.now()
-    const payload = { version: 1, authority, issuedAt, expiresAt: issuedAt + 3600_000 }
-    const body = b64u(Buffer.from(JSON.stringify(payload), 'utf8'))
-    const signature = b64u(createHmac('sha256', secret).update(body).digest())
-    const name = `dsh-auth-${b64u(createHash('sha256').update(authority).digest())}`
-    return `${name}=v1.${body}.${signature}`
-  } catch {
-    return ''
-  }
 }
 
 /**
@@ -375,8 +339,6 @@ export function installRemoteWeb({
       for (const key of Object.keys(headers)) {
         headers[key] = asLocalHeader(key.toLowerCase(), headers[key], base)
       }
-      const session = dshSessionCookie(base.host)
-      if (session) headers.cookie = headers.cookie ? `${headers.cookie}; ${session}` : session
       const upstream = httpRequest(
         { host: base.hostname, port: base.port || 80, method: request.method, path: request.url, headers },
         (up) => {
@@ -416,23 +378,13 @@ export function installRemoteWeb({
         socket.destroy()
         return
       }
-      const session = dshSessionCookie(base.host)
       const upstream = tcpConnect(Number(base.port || 80), base.hostname, () => {
-        // The session cookie has to ride along on the handshake too, or the
-        // upgrade is fenced out even though the page itself loaded.
-        const cookies = []
         let head_text = `${request.method} ${request.url} HTTP/1.1\r\n`
         for (let i = 0; i < request.rawHeaders.length; i += 2) {
           const name = String(request.rawHeaders[i])
-          if (name.toLowerCase() === 'cookie') {
-            cookies.push(String(request.rawHeaders[i + 1] ?? ''))
-            continue
-          }
           const value = asLocalHeader(name.toLowerCase(), String(request.rawHeaders[i + 1] ?? ''), base)
           head_text += `${name}: ${value}\r\n`
         }
-        if (session) cookies.push(session)
-        if (cookies.length > 0) head_text += `Cookie: ${cookies.join('; ')}\r\n`
         head_text += '\r\n'
         upstream.write(head_text)
         if (head && head.length > 0) upstream.write(head)
@@ -454,12 +406,6 @@ export function installRemoteWeb({
     log(`web window on 0.0.0.0:${boundPort}; open http://<lan-ip>:${boundPort}/?token=<control token>`)
     ensureOrigin()
   })
-
-  // The host is handed `bridge.web = info` (the bare info object) and later
-  // calls `bridge.web.setTarget(...)`. Without this alias that call is a silent
-  // no-op, the window keeps `ready: false`, and the phone is told the Host web
-  // service was never found even though its port is already known.
-  info.setTarget = (origin) => setTarget(origin)
 
   return {
     info,
