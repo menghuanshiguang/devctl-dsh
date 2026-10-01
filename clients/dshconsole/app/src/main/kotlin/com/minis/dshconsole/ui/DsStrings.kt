@@ -62,6 +62,12 @@ object DsStr {
     const val groupVoice = "语音"
     const val groupAbout = "关于"
 
+    // ---- 消息操作栏（AssistantChatMessageFooter.kt / UserMessageActionView.kt）
+    const val messagePressCopy = "复制"                                 // message_press_copy
+    const val messagePressRegenerate = "重新生成"                       // message_press_regenerate
+    const val readAloudStartLabel = "朗读"                              // read_aloud_start_label
+    const val share = "分享"                                            // share
+
     // ---- 其它
     const val aiAlert = "回答由 AI 生成，仅供参考"                       // input_a_i_alert / session_a_i_alert
     const val networkError = "网络异常，请检查你的网络状况"               // common_network_error_toast

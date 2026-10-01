@@ -254,7 +254,7 @@ fun DsTopBar(
     subtitle: String? = null,
     left: @Composable (() -> Unit)? = null,
     right: @Composable (() -> Unit)? = null,
-    centerTitle: Boolean = true,
+    centerTitle: Boolean = false,
 ) {
     val p = DshTheme.p
     Box(
@@ -270,7 +270,7 @@ fun DsTopBar(
         Column(
             Modifier
                 .align(if (centerTitle) Alignment.Center else Alignment.CenterStart)
-                .padding(start = if (centerTitle) 0.dp else 48.dp)
+                .padding(start = if (centerTitle) 0.dp else 44.dp)
                 .padding(horizontal = DsSpacing.s2),
             horizontalAlignment = if (centerTitle) Alignment.CenterHorizontally else Alignment.Start,
         ) {

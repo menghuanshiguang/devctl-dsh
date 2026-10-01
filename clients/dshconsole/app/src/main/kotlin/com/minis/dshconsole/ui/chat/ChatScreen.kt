@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -234,7 +235,14 @@ private fun AssistantCell(msg: ChatMessage) {
             Spacer(Modifier.height(DsSpacing.s3))
         }
         val body = msg.fragments.filterIsInstance<ChatFragment.TextFragment>().joinToString("") { it.text }
-        if (body.isNotEmpty()) MarkdownBody(body)
+        if (body.isNotEmpty()) {
+            MarkdownBody(body)
+            // 流式结束后才显示操作栏（原包同样在完成态才出现）
+            if (!msg.streaming) {
+                Spacer(Modifier.height(DsSpacing.s1))
+                AssistantChatMessageFooter()
+            }
+        }
     }
 }
 
@@ -391,6 +399,8 @@ private fun ChatInputCard(
     val p = DshTheme.p
     var draft by remember { mutableStateOf("") }
     val canSend = draft.isNotBlank()
+    // 原包两个占位：文字模式「发消息」/ 语音模式「发消息或按住说话」
+    var focused by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -404,7 +414,7 @@ private fun ChatInputCard(
         Box(Modifier.fillMaxWidth().height(48.dp)) {
             if (draft.isEmpty()) {
                 Text(
-                    DsStr.chatInputPlaceholderVoice,
+                    if (focused) DsStr.chatInputPlaceholderChat else DsStr.chatInputPlaceholderVoice,
                     style = DsType.body,
                     color = p.textPlaceholder,
                     modifier = Modifier.align(Alignment.CenterStart),
@@ -415,7 +425,10 @@ private fun ChatInputCard(
                 onValueChange = { draft = it },
                 textStyle = DsType.body.copy(color = p.textPrimary),
                 cursorBrush = SolidColor(p.brand),
-                modifier = Modifier.fillMaxWidth().align(Alignment.CenterStart),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.CenterStart)
+                    .onFocusChanged { focused = it.isFocused },
             )
         }
         Spacer(Modifier.height(DsSpacing.s2))
