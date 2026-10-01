@@ -255,3 +255,31 @@ private val RadiiPill = 20.dp
  * 13sp 次级灰，左侧与条目文字对齐，首个分组右侧带排序图标
  */
 @Composable
+fun SessionGroupHeader(
+    label: String,
+    modifier: Modifier = Modifier,
+    showSortIcon: Boolean = false,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(start = DsSpacing.screenH, end = DsSpacing.screenH)
+            .padding(top = DsSpacing.s4, bottom = DsSpacing.s1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = DsType.sectionLabel,
+            color = DshTheme.p.textSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        if (showSortIcon) {
+            Icon(
+                Icons.Filled.Tune,
+                "排序",
+                tint = DshTheme.p.textPlaceholder,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
