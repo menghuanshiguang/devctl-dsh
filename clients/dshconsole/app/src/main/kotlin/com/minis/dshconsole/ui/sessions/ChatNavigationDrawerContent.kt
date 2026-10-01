@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.minis.dshconsole.ui.theme.DsRadius
 import com.minis.dshconsole.protocol.DshController
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Workspaces
 import androidx.compose.material.icons.filled.ExpandMore
 import com.minis.dshconsole.ui.DsStr
