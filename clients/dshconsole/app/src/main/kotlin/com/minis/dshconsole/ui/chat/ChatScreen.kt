@@ -447,6 +447,10 @@ private fun ChatInputCard(
                 onClick = onToggleSearch,
             )
             Spacer(Modifier.weight(1f))
+            // ⊕ 常驻；只有最右侧那个按钮在「语音 ↔ 发送」之间切换
+            // （对照真机 1000052250 有文字时仍是 ⊕ + 蓝色↑，1000052251 无文字时是 ⊕ + 语音）
+            DsCircleButton(Icons.Filled.Add, "更多", onToggleUpload)
+            Spacer(Modifier.width(DsSpacing.s1))
             if (canSend) {
                 DsCircleButton(
                     Icons.Filled.ArrowUpward, "发送",
@@ -454,8 +458,6 @@ private fun ChatInputCard(
                     container = p.brand, tint = p.onBrand,
                 )
             } else {
-                DsCircleButton(Icons.Filled.Add, "更多", onToggleUpload)
-                Spacer(Modifier.width(DsSpacing.s1))
                 DsCircleButton(Icons.Filled.GraphicEq, DsStr.voiceInputButton, {})
             }
         }
