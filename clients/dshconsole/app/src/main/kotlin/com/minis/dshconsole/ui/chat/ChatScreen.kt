@@ -571,7 +571,7 @@ private fun QueueDock(
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(DsRadius.pill))
-                        .background(if (item.embedded) p.brandSoft else p.surfaceContainerHighest)
+                        .background(if (item.embedded) p.brandSoft else p.fillStrong)
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                 ) {
                     Text(
