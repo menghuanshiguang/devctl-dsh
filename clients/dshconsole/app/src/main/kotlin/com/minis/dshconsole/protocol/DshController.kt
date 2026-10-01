@@ -118,6 +118,14 @@ class DshController(private val appContext: Context) {
     /** 正在串流的那条助手消息的 id */
     private var streamingId: String? = null
 
+    /**
+     * 消息 id 生成器 —— 必须全局唯一。
+     * ★ LazyColumn 的 key 一旦重复会直接抛 IllegalArgumentException 崩掉 ★
+     * 之前用 seq / messages.size 当兜底（会重复），是闪退的根源。
+     */
+    private var uidSeq = 0L
+    private fun uid(prefix: String): String = "$prefix-" + (uidSeq++)
+
     /** 协议日志（数据管理页可见）—— 每帧一行，最多留 300 行 */
     val debugLog = mutableStateListOf<String>()
 
@@ -324,6 +332,12 @@ class DshController(private val appContext: Context) {
      * ★ 字段是 kind，不是 type ★（值是 user / assistant / tool-call / tool-result /
      *   inbox / turn-start / turn-end / event —— 来自插件 index.js:1458 describeEvent）
      */
+    /** 若 id 已被占用，换一个唯一 id（双保险，绝不让 LazyColumn 拿到重复 key） */
+    private fun uniqueId(candidate: String): String =
+        if (messages.none { it.id == candidate } || candidate.isEmpty()) {
+            if (candidate.isEmpty()) uid("m") else candidate
+        } else uid("d")
+
     private fun applyRecord(rec: JSONObject) {
         val kind = pick(rec, "kind", "type", "event")
         when (kind) {
@@ -345,10 +359,10 @@ class DshController(private val appContext: Context) {
             // ---------------- 用户消息
             "user", "user/message" -> {
                 val text = pick(rec, "text", "content")
-                val id = pick(rec, "id", "messageId", "seq").let { if (it.isEmpty()) "u${messages.size}" else it }
+                val id = pick(rec, "id", "messageId", "seq").ifEmpty { uid("u") }
                 if (text.isNotEmpty()) {
                     messages.add(
-                        ChatMessage(id = id, fromUser = true, fragments = listOf(ChatFragment.TextFragment(text)))
+                        ChatMessage(id = uniqueId(id), fromUser = true, fragments = listOf(ChatFragment.TextFragment(text)))
                     )
                 }
             }
@@ -364,7 +378,7 @@ class DshController(private val appContext: Context) {
                 val id = if (mergeIdx >= 0) {
                     messages[mergeIdx].id
                 } else {
-                    pick(rec, "id", "messageId", "seq").let { if (it.isEmpty()) "a${messages.size}" else it }
+                    pick(rec, "id", "messageId", "seq").ifEmpty { uid("a") }
                 }
                 val frags = ArrayList<ChatFragment>()
                 if (mergeIdx >= 0) frags.addAll(messages[mergeIdx].fragments)
@@ -391,7 +405,7 @@ class DshController(private val appContext: Context) {
                         messages[mergeIdx] = messages[mergeIdx].copy(fragments = frags, streaming = true)
                         streamingId = id
                     } else {
-                        messages.add(ChatMessage(id = id, fromUser = false, fragments = frags, streaming = streaming))
+                        messages.add(ChatMessage(id = uniqueId(id), fromUser = false, fragments = frags, streaming = streaming))
                         if (streaming) streamingId = id
                     }
                 }
@@ -399,11 +413,10 @@ class DshController(private val appContext: Context) {
 
             // ---------------- 工具调用 / 结果
             "tool-call", "tool/call" -> {
-                val id = pick(rec, "id", "callId", "toolCallId", "seq")
-                    .let { if (it.isEmpty()) "t${messages.size}" else it }
+                val id = pick(rec, "id", "callId", "toolCallId", "seq").ifEmpty { uid("t") }
                 messages.add(
                     ChatMessage(
-                        id = id,
+                        id = uniqueId(id),
                         fromUser = false,
                         fragments = listOf(
                             ChatFragment.ToolFragment(
@@ -445,7 +458,7 @@ class DshController(private val appContext: Context) {
                 if (t.isNotEmpty() && kind != "event") {
                     messages.add(
                         ChatMessage(
-                            id = pick(rec, "id", "seq").let { if (it.isEmpty()) "x${messages.size}" else it },
+                            id = pick(rec, "id", "seq").ifEmpty { uid("x") },
                             fromUser = false,
                             fragments = listOf(ChatFragment.ReasoningFragment(t)),
                         )
@@ -457,7 +470,7 @@ class DshController(private val appContext: Context) {
 
     /** 流式增量：按 messageId 追加文本（字符只增不改 → 不触发整行重排） */
     private fun applyDelta(d: JSONObject) {
-        val mid = pick(d, "messageId", "id").ifEmpty { streamingId ?: "s${messages.size}" }
+        val mid = pick(d, "messageId", "id").ifEmpty { streamingId ?: uid("s") }
         val text = pick(d, "text", "delta", "content")
         if (text.isEmpty()) return
         streaming = true
@@ -503,7 +516,7 @@ class DshController(private val appContext: Context) {
         // 先本地上屏，等 host 回执
         messages.add(
             ChatMessage(
-                id = "local${messages.size}",
+                id = uid("local"),
                 fromUser = true,
                 fragments = listOf(ChatFragment.TextFragment(text)),
             )
