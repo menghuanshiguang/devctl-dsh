@@ -65,7 +65,7 @@ fun ChatWelcome(
             ChatWelcomeLargeLogo()
             Spacer(Modifier.height(LogoGap))
             Text(
-                DsStr.greeting[greetingIndex % DsStr.greeting.size],
+                if (greetingIndex % 2 == 0) DsStr.greeting else DsStr.greetingAlt,
                 style = DsType.greeting,
                 color = DshTheme.p.textPrimary,
                 textAlign = TextAlign.Center,

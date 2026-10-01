@@ -362,6 +362,27 @@ class DshController(private val appContext: Context) {
         }
     }
 
+    /**
+     * 把本地语言同步给 host —— 让 host 侧（会话标题、回复语言）也跟着变。
+     * 方法名走多候选，host 不支持就静默跳过，不影响本地。
+     */
+    fun setHostLang(zh: Boolean) {
+        val d = dsh ?: return
+        thread(name = "dsh-lang") {
+            val lang = if (zh) "zh-Hans" else "en"
+            val params = JSONObject().put("lang", lang).put("language", lang)
+            for (m in listOf("settings.set", "config.set", "host.settings")) {
+                val ok = runCatching { d.request(m, params, 8000, null) }.isSuccess
+                if (ok) {
+                    status = if (zh) "已同步语言：中文" else "Language synced: English"
+                    return@thread
+                }
+            }
+            status = if (zh) "语言已本地切换（host 未提供设置接口）"
+            else "Language switched locally (host has no settings API)"
+        }
+    }
+
     fun cancel() {
         val d = dsh ?: return
         val sid = currentSessionId ?: return

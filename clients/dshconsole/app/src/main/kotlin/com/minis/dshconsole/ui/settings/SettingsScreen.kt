@@ -64,6 +64,7 @@ fun SettingsScreen(
     hostName: String = "",
     prefs: DshPrefs,
     onDisconnect: () -> Unit = {},
+    onSyncLang: (DshPrefs.Lang) -> Unit = {},
 ) {
     Column(
         modifier
@@ -133,6 +134,17 @@ fun SettingsScreen(
             // ------------------------------------------------ 应用
             DsSectionLabel("应用")
             DsGroupCard {
+                DsRow(
+                    "语言",
+                    value = if (prefs.lang == DshPrefs.Lang.Zh) "中文（简体中文）" else "English",
+                    icon = Icons.Filled.Language,
+                    onClick = {
+                        val next = if (prefs.lang == DshPrefs.Lang.Zh) DshPrefs.Lang.En else DshPrefs.Lang.Zh
+                        prefs.setLang(next)          // 本地立刻生效
+                        onSyncLang(next)             // 同时同步给 host
+                    },
+                )
+                DsRowDivider()
                 DsRow(
                     "外观",
                     value = when (prefs.themeMode) {

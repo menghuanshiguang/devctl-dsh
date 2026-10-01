@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.minis.dshconsole.ui.DsStr
 
 /**
  * 本机设置（SharedPreferences 落盘 + Compose 可订阅状态）。
@@ -50,7 +51,13 @@ class DshPrefs(context: Context) {
 
     fun setLang(l: Lang) {
         lang = l
+        DsStr.zh = (l == Lang.Zh)
         sp.edit().putString("lang", l.name).apply()
+    }
+
+    init {
+        // 启动时把落盘的语言灌给文案表
+        DsStr.zh = (lang == Lang.Zh)
     }
 
     fun setStreamPlainText(v: Boolean) {

@@ -194,6 +194,7 @@ private fun RootBody(prefs: DshPrefs, controller: DshController) {
                     hostName = controller.hostName,
                     prefs = prefs,
                     onDisconnect = { controller.disconnect() },
+                    onSyncLang = { controller.setHostLang(it == DshPrefs.Lang.Zh) },
                 )
 
                 Screen.TokenStats -> TokenStatsScreen(
