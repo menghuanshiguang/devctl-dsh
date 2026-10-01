@@ -10,6 +10,8 @@ import com.minis.dshconsole.ui.theme.DsMotion
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -432,21 +434,32 @@ private fun ChatInputCard(
             )
         }
         Spacer(Modifier.height(DsSpacing.s2))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            DsChip(
-                DsStr.messageR1Button,
-                icon = Icons.Filled.Psychology,
-                selected = deepThink,
-                onClick = onToggleThink,
-            )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 左侧胶囊组：给 weight，Row 会先量右侧按钮，按钮尺寸不会被抢
+            Row(
+                Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DsChip(
+                    DsStr.messageR1Button,
+                    icon = Icons.Filled.Psychology,
+                    selected = deepThink,
+                    onClick = onToggleThink,
+                )
+                Spacer(Modifier.width(DsSpacing.s2))
+                DsChip(
+                    DsStr.messageSearchButton,
+                    icon = Icons.Filled.TravelExplore,
+                    selected = webSearch,
+                    onClick = onToggleSearch,
+                )
+            }
             Spacer(Modifier.width(DsSpacing.s2))
-            DsChip(
-                DsStr.messageSearchButton,
-                icon = Icons.Filled.TravelExplore,
-                selected = webSearch,
-                onClick = onToggleSearch,
-            )
-            Spacer(Modifier.weight(1f))
             // ⊕ 常驻；只有最右侧那个按钮在「语音 ↔ 发送」之间切换
             // （对照真机 1000052250 有文字时仍是 ⊕ + 蓝色↑，1000052251 无文字时是 ⊕ + 语音）
             DsCircleButton(Icons.Filled.Add, "更多", onToggleUpload)

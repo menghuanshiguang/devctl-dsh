@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -228,7 +229,8 @@ fun DsCircleButton(
 ) {
     Box(
         modifier = modifier
-            .size(size)
+            // requiredSize：忽略父级约束，保证圆形按钮不会被 Row 挤扁
+            .requiredSize(size)
             .clip(CircleShape)
             .background(container)
             .clickable(onClick = onClick),
