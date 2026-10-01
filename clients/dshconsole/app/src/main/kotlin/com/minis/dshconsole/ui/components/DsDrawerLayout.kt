@@ -1,12 +1,12 @@
 package com.minis.dshconsole.ui.components
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -14,59 +14,65 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.ui.focus.FocusManager
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.minis.dshconsole.ui.theme.DshTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /*
  * 侧栏抽屉 —— 复刻 DeepSeek 原包的切边栏动画
  *
- * 对照真机逐帧截图（1000052239 → 1000052244）还原出的行为：
- *   ① 抽屉从左侧滑入，**不是**单纯的蒙层淡入；
- *   ② 主内容整体**向右平移**（位移量 = 抽屉宽度 × 进度），
- *      并在**左侧两角**加上大圆角（topStart / bottomStart），
- *      看起来像一张卡片被推开；
- *   ③ 抽屉宽度约为屏宽的 82%（截图量得右边缘在 x≈750/920）；
- *   ④ **没有蒙层** —— 录屏逐帧看，抽屉自始至终是清晰白底，不压暗；
-*      主内容左边缘有一道细投影作为接缝。
+ * 对照真机录屏（1000052245）逐帧还原：
+ *   ① 主内容作为一整块【带圆角的白色面板】向右平移，位移量 = 抽屉宽 × 进度；
+ *   ② 左边缘两角大圆角 ≈28dp，随进度线性增长；
+ *   ③ 抽屉宽度 ≈屏宽 82%；
+ *   ④ **没有蒙层** —— 抽屉自始至终是清晰白底，不压暗；
+ *      主内容左边缘只有一道细投影作为接缝；
+ *   ⑤ 是平移不是缩放。
+ *   ⑥ 弹簧参数取自原包 smali（zz7.smali 常量表）：
+ *      spring(dampingRatio = 1.0f, stiffness = 1400f)
  *
- * 实现：三层 —— 抽屉（底层）/ 蒙层 / 主内容（上层，位移 + 圆角）。
- * 进度用 Animatable 驱动，支持从左边缘拖拽。
+ * ★ 稳定性（修闪退）★
+ * 上一版把「拖拽」和「open 状态变化」两条路都指向同一个 Animatable：
+ * 手势里 launch { snapTo }、同时 LaunchedEffect 里 animateTo，
+ * 两边互相取消，CancellationException 冒到 composition 直接闪退。
+ * 现在：
+ *   · 加 dragging 标志，拖拽期间 LaunchedEffect 不接管动画；
+ *   · 拖拽更新只走一条协程路径，并且 runCatching 兜底；
+ *   · 所有 animateTo 都 catch 掉 CancellationException；
+ *   · drawerPx 为 0 时直接跳过，避免除零。
  */
 
 /** 抽屉宽度占屏宽的比例（截图实测 ≈82%） */
 private const val DrawerWidthFraction = 0.82f
 
-/** 主内容左边缘的投影（录屏里抽屉与内容之间有一道细接缝） */
-private val ContentShadow = 8.dp
-
 /** 主内容被推开时的左圆角（录屏实测约 28dp） */
 private val ContentCorner = 28.dp
 
-/** 抽屉落定所用的弹簧 */
+/** 主内容左边缘的投影（录屏里抽屉与内容之间有一道细接缝） */
+private val ContentShadow = 8.dp
+
 private val OpenSpec = spring<Float>(dampingRatio = 1.0f, stiffness = 1400f)
-private val CloseSpec = tween<Float>(durationMillis = 240)
+private val CloseSpec = tween<Float>(durationMillis = 220)
+
+/** 关闭阈值：超过 50% 就吸附到打开 */
+private const val SettleThreshold = 0.5f
 
 @Composable
 fun DsDrawerLayout(
@@ -82,21 +88,32 @@ fun DsDrawerLayout(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
 
+    // 拖拽中：由手势独占 progress，LaunchedEffect 不参与
+    var dragging by remember { mutableStateOf(false) }
+
+    LaunchedEffect(open, dragging) {
+        if (dragging) return@LaunchedEffect
+        runCatching {
+            progress.animateTo(
+                targetValue = if (open) 1f else 0f,
+                animationSpec = if (open) OpenSpec else CloseSpec,
+            )
+        }.getOrElse { e ->
+            if (e !is CancellationException) throw e
+        }
+    }
+
+    // 切到侧栏时收起输入法并清焦点（否则键盘会浮在抽屉上方）
     LaunchedEffect(open) {
         if (open) {
-            // 切到侧栏时收起输入法并清焦点（否则键盘会浮在抽屉上方）
-            focusManager.clearFocus(force = true)
-            keyboard?.hide()
-            progress.animateTo(1f, OpenSpec)
-        } else {
-            progress.animateTo(0f, CloseSpec)
+            runCatching { focusManager.clearFocus(force = true) }
+            runCatching { keyboard?.hide() }
         }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val drawerWidth = maxWidth * DrawerWidthFraction
-        val drawerPx = with(density) { drawerWidth.toPx() }
-        var totalDrag by remember { mutableFloatStateOf(0f) }
+        val drawerPx = with(density) { drawerWidth.toPx() }.coerceAtLeast(1f)
 
         // ---------------- 底层：抽屉
         Box(
@@ -107,14 +124,16 @@ fun DsDrawerLayout(
             drawerContent()
         }
 
-        // ---------------- 上层：主内容（右移 + 左圆角 + 可拖拽）
-        val corner = ContentCorner * progress.value
+        // ---------------- 上层：主内容（右移 + 左圆角 + 左侧投影 + 可拖拽）
+        val p = progress.value
+        val corner = ContentCorner * p
+
         Box(
             Modifier
                 .fillMaxSize()
-                .offsetX { (drawerPx * progress.value).roundToInt() }
+                .offset { IntOffset((drawerPx * p).roundToInt(), 0) }
                 .shadow(
-                    elevation = ContentShadow * progress.value,
+                    elevation = ContentShadow * p,
                     shape = RoundedCornerShape(topStart = corner, bottomStart = corner),
                     clip = false,
                 )
@@ -127,29 +146,32 @@ fun DsDrawerLayout(
                     )
                 )
                 .background(DshTheme.p.bg)
-                .pointerInput(Unit) {
+                .pointerInput(drawerPx) {
                     detectHorizontalDragGestures(
+                        onDragStart = { dragging = true },
+                        onDragCancel = { dragging = false },
                         onDragEnd = {
-                            scope.launch {
-                                val target = if (progress.value > 0.5f) 1f else 0f
-                                totalDrag = 0f
-                                if (target == 1f && !open) onOpen() else if (target == 0f && open) onClose()
-                                progress.animateTo(target, OpenSpec)
+                            dragging = false
+                            val settleOpen = progress.value >= SettleThreshold
+                            runCatching {
+                                if (settleOpen) onOpen() else onClose()
                             }
                         },
-                        onHorizontalDrag = { _, delta ->
+                        onHorizontalDrag = { change, delta ->
+                            change.consume()
+                            val next = (progress.value + delta / drawerPx).coerceIn(0f, 1f)
                             scope.launch {
-                                val next = (progress.value + delta / drawerPx).coerceIn(0f, 1f)
-                                progress.snapTo(next)
+                                runCatching { progress.snapTo(next) }
                             }
                         },
                     )
                 }
         ) {
             content()
-            // 打开状态下点右侧露出的部分可关闭
-            if (progress.value > 0.99f) {
-                // 纯点击层：无涟漪、无按压动效
+
+            // 打开时露出的部分：点一下关抽屉。
+            // 纯热区 —— 不要涟漪、不要按压动效。
+            if (p > 0.99f) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -163,7 +185,3 @@ fun DsDrawerLayout(
         }
     }
 }
-
-/** offset { IntOffset } 的简写 */
-private fun Modifier.offsetX(block: () -> Int): Modifier =
-    this.offset { IntOffset(block(), 0) }
