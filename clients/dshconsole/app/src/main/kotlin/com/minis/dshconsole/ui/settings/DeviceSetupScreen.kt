@@ -57,11 +57,16 @@ fun DeviceSetupScreen(
 ) {
     val p = DshTheme.p
     var name by remember { mutableStateOf(initial?.name?.ifEmpty { "我的 DSH" } ?: "我的 DSH") }
-    var host by remember { mutableStateOf(initial?.host ?: "") }
-    var port by remember { mutableStateOf(((initial?.port ?: 7788)).toString()) }
+    // 主机与端口合并成一个输入框：192.168.2.5:7788（不写端口默认 7788）
+    var addr by remember {
+        mutableStateOf(
+            if (initial != null && initial.host.isNotEmpty()) "${initial.host}:${initial.port}" else ""
+        )
+    }
     var token by remember { mutableStateOf(initial?.token ?: "") }
 
-    val canSave = host.isNotBlank() && port.toIntOrNull() != null
+    val parsed = remember(addr) { parseAddr(addr) }
+    val canSave = parsed != null
 
     Column(
         Modifier
@@ -121,20 +126,20 @@ fun DeviceSetupScreen(
             DsGroupCard {
                 Column(Modifier.padding(DsSpacing.cardInset)) {
                     DsField(
-                        value = host,
-                        onValueChange = { host = it.trim() },
-                        label = "主机 / IP",
-                        placeholder = "192.168.2.5",
+                        value = addr,
+                        onValueChange = { addr = it.filter { c -> c.isLetterOrDigit() || c == '.' || c == ':' || c == '-' } },
+                        label = "主机:端口",
+                        placeholder = "192.168.2.5:7788",
                         keyboardType = KeyboardType.Uri,
                     )
-                    Spacer(Modifier.height(DsSpacing.s3))
-                    DsField(
-                        value = port,
-                        onValueChange = { v -> port = v.filter { it.isDigit() }.take(5) },
-                        label = "端口",
-                        placeholder = "7788",
-                        keyboardType = KeyboardType.Number,
-                    )
+                    if (addr.isNotBlank() && parsed == null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "格式：主机:端口，例如 192.168.2.5:7788",
+                            style = DsType.rowSubtitle,
+                            color = DshTheme.p.danger,
+                        )
+                    }
                     Spacer(Modifier.height(DsSpacing.s3))
                     DsField(
                         value = token,
@@ -153,13 +158,16 @@ fun DeviceSetupScreen(
                 DsButton(
                     text = "保存并连接",
                     onClick = {
-                        val dev = Store.Dev().apply {
-                            this.name = name.ifBlank { "我的 DSH" }
-                            this.host = host.trim()
-                            this.port = port.toIntOrNull() ?: 7788
-                            this.token = token.trim()
+                        val pr = parsed
+                        if (pr != null) {
+                            val dev = Store.Dev().apply {
+                                this.name = name.ifBlank { "我的 DSH" }
+                                this.host = pr.first
+                                this.port = pr.second
+                                this.token = token.trim()
+                            }
+                            onSaveAndConnect(dev)
                         }
-                        onSaveAndConnect(dev)
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = canSave,
@@ -168,7 +176,7 @@ fun DeviceSetupScreen(
 
             Spacer(Modifier.height(DsSpacing.s3))
             Text(
-                "在 PC 上跑着 DSH + devctl-dsh 插件时，填那台机器的局域网 IP 与 7788 端口。",
+                "在 PC 上跑着 DSH + devctl-dsh 插件时，填那台机器的「局域网 IP:端口」。不写端口默认 7788。",
                 style = DsType.rowSubtitle,
                 color = p.textPlaceholder,
                 modifier = Modifier.padding(horizontal = DsSpacing.screenH),
@@ -176,6 +184,23 @@ fun DeviceSetupScreen(
             Spacer(Modifier.height(40.dp))
         }
     }
+}
+
+/**
+ * 解析 "主机[:端口]"。
+ *   192.168.2.5        -> ("192.168.2.5", 7788)
+ *   192.168.2.5:10201  -> ("192.168.2.5", 10201)
+ *   2001:db8::1:7788   -> 取最后一个冒号切分
+ */
+private fun parseAddr(raw: String): Pair<String, Int>? {
+    val t = raw.trim()
+    if (t.isEmpty()) return null
+    val i = t.lastIndexOf(':')
+    if (i < 0) return t to 7788
+    val h = t.substring(0, i).trim().trim('[', ']')
+    val p = t.substring(i + 1).trim().toIntOrNull() ?: return null
+    if (h.isEmpty() || p !in 1..65535) return null
+    return h to p
 }
 
 @Composable
