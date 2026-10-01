@@ -8,6 +8,10 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import com.minis.dshconsole.ui.theme.DsMotion
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -208,38 +212,33 @@ private fun UserCell(msg: ChatMessage) {
 @Composable
 private fun AssistantCell(msg: ChatMessage) {
     Column(Modifier.fillMaxWidth()) {
-        val traces = msg.fragments.filter {
-            it is ChatFragment.ReasoningFragment || it is ChatFragment.ToolFragment
+        val thinking = msg.fragments.filterIsInstance<ChatFragment.ReasoningFragment>()
+        val tools = msg.fragments.filterIsInstance<ChatFragment.ToolFragment>()
+
+        // ---- 思考块（独立容器，流式自动展开、收尾自动收起）----
+        thinking.forEachIndexed { idx, f ->
+            ThinkingBlock(
+                key = msg.id + "#" + idx,
+                content = f.text,
+                isStreaming = msg.streaming && idx == thinking.lastIndex,
+            )
+            Spacer(Modifier.height(6.dp))
         }
-        if (traces.isNotEmpty()) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(DsRadius.card))
-                    .background(DshTheme.p.fill)
-                    .padding(horizontal = DsSpacing.s3, vertical = DsSpacing.s2),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                traces.forEach { f ->
-                    when (f) {
-                        is ChatFragment.ReasoningFragment -> TraceRow(
-                            Icons.Filled.Psychology, "思考",
-                            f.text.lineSequence().firstOrNull().orEmpty(), msg.streaming,
-                        )
-                        is ChatFragment.ToolFragment -> TraceRow(
-                            Icons.Filled.Build, f.name, f.summary,
-                            f.state == ToolState.Running, f.state == ToolState.Error,
-                        )
-                        else -> Unit
-                    }
-                }
-            }
-            Spacer(Modifier.height(DsSpacing.s3))
+
+        // ---- 工具行（每行一个 36dp 胶囊）----
+        tools.forEach { t ->
+            ToolCallPill(
+                name = t.name,
+                summary = t.summary,
+                state = t.state,
+                running = msg.streaming && t.state == ToolState.Running,
+            )
+            Spacer(Modifier.height(6.dp))
         }
+
         val body = msg.fragments.filterIsInstance<ChatFragment.TextFragment>().joinToString("") { it.text }
         if (body.isNotEmpty()) {
             MarkdownBody(body)
-            // 流式结束后才显示操作栏（原包同样在完成态才出现）
             if (!msg.streaming) {
                 Spacer(Modifier.height(DsSpacing.s1))
                 AssistantChatMessageFooter()
@@ -248,35 +247,151 @@ private fun AssistantCell(msg: ChatMessage) {
     }
 }
 
+/**
+ * 思考块 —— 参考 OpenMinis 的 ChatAssistantMessageUI.kt ThinkingBlock：
+ *   · 独立容器：#007AFF 6% 底 + 15% 描边 + 12dp 圆角，内边距 12/8
+ *   · header：图标 + 「思考」+ 字符数 + chevron，只有 header 可点
+ *   · 流式开始自动展开；流结束自动收起（用户手动收起过则不打扰）
+ *   · 超长保护：只渲染尾部窗口，避免 Compose 每次测量整段
+ */
 @Composable
-private fun TraceRow(
-    icon: ImageVector,
-    label: String,
-    summary: String,
-    running: Boolean,
-    failed: Boolean = false,
+private fun ThinkingBlock(
+    key: String,
+    content: String,
+    isStreaming: Boolean,
 ) {
-    val p = DshTheme.p
-    val color by animateColorAsState(
-        when {
-            failed -> p.danger
-            running -> p.textSecondary
-            else -> p.textSecondary.copy(alpha = 0.75f)
-        },
-        label = "trace",
-    )
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = p.textSecondary, modifier = Modifier.size(15.dp))
-        Spacer(Modifier.width(DsSpacing.s2))
-        Text(label, style = DsType.trace, color = p.textPrimary, maxLines = 1)
-        Spacer(Modifier.width(DsSpacing.s2))
-        Box(Modifier.weight(1f)) {
-            Text(summary, style = DsType.trace, color = color, maxLines = 1)
-            if (running) ShimmerOverlay()
+    val thinkingBlue = Color(0xFF007AFF)
+    var expanded by remember(key) { mutableStateOf(isStreaming) }
+    var userCollapsed by remember(key) { mutableStateOf(false) }
+
+    LaunchedEffect(key, isStreaming) {
+        if (isStreaming) {
+            if (!userCollapsed) expanded = true
+        } else {
+            expanded = false
         }
-        if (running) {
-            Spacer(Modifier.width(DsSpacing.s2))
-            Box(Modifier.size(6.dp).clip(CircleShape).background(p.brand))
+    }
+
+    val charCount = content.length
+    val charLabel = if (charCount >= 1000) "${charCount / 1000}K" else "$charCount"
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(thinkingBlue.copy(alpha = 0.06f))
+            .border(0.5.dp, thinkingBlue.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable {
+                    expanded = !expanded
+                    if (!expanded) userCollapsed = true else userCollapsed = false
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Psychology,
+                null,
+                tint = thinkingBlue,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("思考", style = DsType.trace, color = thinkingBlue)
+            Spacer(Modifier.width(8.dp))
+            Text(charLabel, style = DsType.trace, color = thinkingBlue.copy(alpha = 0.6f))
+            Spacer(Modifier.weight(1f))
+            if (isStreaming) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(thinkingBlue))
+                Spacer(Modifier.width(8.dp))
+            }
+            Icon(
+                if (expanded) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                if (expanded) "收起" else "展开",
+                tint = thinkingBlue.copy(alpha = 0.7f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            val shown = remember(charCount) {
+                if (charCount > 3000) content.takeLast(3000) else content
+            }
+            Text(
+                shown,
+                style = DsType.trace,
+                color = DshTheme.p.textSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+/** 状态色：每种工具给一个强调色（对应 OpenMinis 的 toolAccentColor） */
+private fun toolAccent(name: String): Color = when {
+    name.contains("read", true) -> Color(0xFF34C759)
+    name.contains("write", true) || name.contains("edit", true) -> Color(0xFFFF9F0A)
+    name.contains("bash", true) || name.contains("exec", true) || name.contains("shell", true) ->
+        Color(0xFFAF52DE)
+    name.contains("search", true) || name.contains("grep", true) -> Color(0xFF007AFF)
+    name.contains("web", true) -> Color(0xFF00C7BE)
+    else -> Color(0xFF8E8E93)
+}
+
+/**
+ * 工具调用胶囊 —— 参考 OpenMinis 的 ToolCallPill：
+ * 单行、36dp 高、左侧状态点 + 工具名 + 摘要，运行中整行扫光。
+ */
+@Composable
+private fun ToolCallPill(
+    name: String,
+    summary: String,
+    state: ToolState,
+    running: Boolean,
+) {
+    val accent = toolAccent(name)
+    val failed = state == ToolState.Error
+    val lineColor by animateColorAsState(
+        when {
+            failed -> DshTheme.p.danger
+            running -> accent
+            else -> DshTheme.p.textSecondary
+        },
+        label = "toolLine",
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(accent.copy(alpha = 0.08f))
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (failed) DshTheme.p.danger else accent)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            name,
+            style = DsType.trace,
+            color = if (failed) DshTheme.p.danger else accent,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) {
+            Text(
+                summary,
+                style = DsType.trace,
+                color = lineColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (running) ShimmerOverlay()
         }
     }
 }
