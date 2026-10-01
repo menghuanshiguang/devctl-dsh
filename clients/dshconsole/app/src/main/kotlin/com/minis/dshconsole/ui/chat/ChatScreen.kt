@@ -26,6 +26,7 @@ import com.minis.dshconsole.R
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
