@@ -86,7 +86,7 @@ fun ChatNavigationDrawerContent(
                         showSortIcon = gi == 0,
                     )
                 }
-                itemsIndexed(sessions, key = { gi2, idx, _ -> "${label}_$gi2_$idx" }) { _, title ->
+                itemsIndexed(sessions, key = { idx, _ -> label + "_" + idx }) { _, title ->
                     ChatSessionItem(title = title, onClick = { onOpenSession(title) })
                 }
             }
