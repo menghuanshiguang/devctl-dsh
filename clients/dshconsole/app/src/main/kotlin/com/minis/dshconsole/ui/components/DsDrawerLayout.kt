@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
@@ -126,6 +128,10 @@ fun DsDrawerLayout(
 
         // ---------------- 上层：主内容（右移 + 左圆角 + 左侧投影 + 可拖拽）
         val p = progress.value
+        // ★ 缩放：内容被推开时向左边缘收缩 ★
+        // 之前我判断成「纯平移不缩放」是错的 —— 逐帧看，
+        // 内容在右移的同时还向【左边缘】收缩，这才是「卡片被推远」的层次感。
+        val contentScale = 1f - ContentScaleAmount * p
         // ★ 圆角恒定，不随进度缩放 ★
         // 对照原版逐帧：内容只移开 24% 时圆角依然很大；
         // 我原来写 corner = ContentCorner * p，动画刚开始时半径接近 0（看着像直角），
@@ -135,6 +141,11 @@ fun DsDrawerLayout(
         Box(
             Modifier
                 .fillMaxSize()
+                .scale(
+                    scale = contentScale,
+                    // 锚点在左边缘中点：内容向左侧（靠近抽屉的那一边）收缩
+                    transformOrigin = TransformOrigin(0f, 0.5f),
+                )
                 .offset { IntOffset((drawerPx * p).roundToInt(), 0) }
                 .shadow(
                     elevation = ContentShadow * p,   // 投影随进度淡入，圆角保持恒定
