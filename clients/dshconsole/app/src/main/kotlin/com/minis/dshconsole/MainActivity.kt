@@ -56,7 +56,6 @@ import com.minis.dshconsole.ui.components.DsDrawerLayout
 import com.minis.dshconsole.ui.components.DsRow
 import com.minis.dshconsole.ui.components.DsRowDivider
 import com.minis.dshconsole.ui.components.DsTopBar
-import com.minis.dshconsole.ui.sessions.SessionListScreen
 import com.minis.dshconsole.ui.settings.DeviceSetupScreen
 import com.minis.dshconsole.ui.settings.SettingsScreen
 import com.minis.dshconsole.ui.theme.DsSpacing
@@ -81,7 +80,7 @@ class MainActivity : ComponentActivity() {
 
 private const val NEW_SESSION = "新的会话"
 
-private enum class Screen { Chat, Sessions, Settings, Setup }
+private enum class Screen { Chat, Settings, Setup }
 
 @Composable
 private fun Root() {
@@ -109,11 +108,6 @@ private fun Root() {
         }
     }
 
-    val sessionTitles = controller.sessionTitles
-    val sessionGroups = remember(sessionTitles.toList()) {
-        if (sessionTitles.isEmpty()) emptyList()
-        else listOf("会话" to sessionTitles.toList())
-    }
 
     BackHandler(enabled = screen != Screen.Chat) { screen = Screen.Chat }
 
@@ -123,13 +117,13 @@ private fun Root() {
         onClose = { drawerOpen = false },
         drawerContent = {
             ChatNavigationDrawerContent(
-                groups = sessionGroups,
-                accountName = "faerydewiee",
-                selectedTitle = sessionTitle,
-                selectedGroup = "今天",
-                onOpenSession = { t ->
-                    sessionTitle = t
-                    controller.openSession(t)
+                sessions = controller.sessions,
+                connected = controller.connected,
+                accountName = controller.hostName.ifEmpty { "未连接" },
+                selectedId = controller.currentSessionId,
+                onOpenSession = { it ->
+                    sessionTitle = it.title
+                    controller.openSession(it)
                     screen = Screen.Chat
                     drawerOpen = false
                 },
@@ -182,15 +176,6 @@ private fun Root() {
                     connectionStatus = controller.status,
                 )
 
-                Screen.Sessions -> SessionListScreen(
-                    groups = sessionGroups,
-                    accountName = "faerydewiee",
-                    onOpenSession = { t ->
-                        sessionTitle = t
-                        screen = Screen.Chat
-                    },
-                    onOpenSettings = { screen = Screen.Settings },
-                )
 
                 Screen.Chat -> Column(Modifier.fillMaxSize()) {
                     DsTopBar(

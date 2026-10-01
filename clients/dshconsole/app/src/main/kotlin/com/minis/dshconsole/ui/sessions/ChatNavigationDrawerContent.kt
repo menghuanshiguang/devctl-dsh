@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.minis.dshconsole.ui.theme.DsRadius
+import com.minis.dshconsole.protocol.DshController
 import com.minis.dshconsole.ui.DsStr
 import com.minis.dshconsole.ui.components.DsSearchBar
 import com.minis.dshconsole.ui.theme.DsSpacing
@@ -56,13 +57,13 @@ import com.minis.dshconsole.ui.theme.DshTheme
  */
 @Composable
 fun ChatNavigationDrawerContent(
-    groups: List<Pair<String, List<String>>>,
+    sessions: List<DshController.SessionItem>,
     accountName: String,
     modifier: Modifier = Modifier,
     showAccount: Boolean = true,
-    selectedTitle: String? = null,
-    selectedGroup: String? = null,
-    onOpenSession: (String) -> Unit = {},
+    selectedId: String? = null,
+    connected: Boolean = false,
+    onOpenSession: (DshController.SessionItem) -> Unit = {},
     onOpenAccountMenu: () -> Unit = {},
     onSearch: () -> Unit = {},
 ) {
@@ -85,18 +86,24 @@ fun ChatNavigationDrawerContent(
 
         // ---------- L1 分组 + L2 会话
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            groups.forEachIndexed { gi, (label, sessions) ->
-                item(key = "group_$label") {
-                    SessionGroupHeader(
-                        label = label,
-                        showSortIcon = gi == 0,
+            if (sessions.isEmpty()) {
+                item {
+                    Text(
+                        if (connected) "没有会话" else "未连接",
+                        style = DsType.rowSubtitle,
+                        color = DshTheme.p.textPlaceholder,
+                        modifier = Modifier.padding(horizontal = DsSpacing.screenH, vertical = DsSpacing.s4),
                     )
                 }
-                itemsIndexed(sessions, key = { idx, _ -> label + "_" + idx }) { _, title ->
+            } else {
+                item(key = "group_header") {
+                    SessionGroupHeader(label = "会话", showSortIcon = true)
+                }
+                itemsIndexed(sessions, key = { _, it -> it.id }) { _, it ->
                     ChatSessionItem(
-                        title = title,
-                        selected = title == selectedTitle && label == selectedGroup,
-                        onClick = { onOpenSession(title) },
+                        title = it.title,
+                        selected = it.id == selectedId,
+                        onClick = { onOpenSession(it) },
                     )
                 }
             }

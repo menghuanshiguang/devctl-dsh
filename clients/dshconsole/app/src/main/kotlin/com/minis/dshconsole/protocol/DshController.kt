@@ -16,18 +16,29 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /*
- * 协议层桥接 —— 把老的 Java 协议实现（Dsh/Store/Wire）接到新的 Compose UI 上。
+ * 协议层桥接 —— 把老的 Java 协议实现（Dsh/Store/Wire）接到 Compose UI 上。
  *
- * 协议（devctl-dsh Host 插件，JSON Lines over TCP，token 鉴权）：
- *   sessions.list    列出会话
- *   sessions.prompt  发送消息    { sessionId, text, mode?, images? }
- *   sessions.watch   订阅会话    → watch-start / snapshot / event / delta / tool-delta / watch-end
+ * 协议（devctl-dsh Host 插件，JSON Lines over TCP，token 鉴权）
+ *   sessions.list    列出会话        -> { sessions|items: [{ id, title|name, ... }] }
+ *   sessions.prompt  发送消息        { sessionId, text, mode?, images? }
+ *   sessions.watch   订阅会话        -> 事件流（见下）
  *   sessions.cancel  打断
- *   sessions.inbox   信箱（排队项）
  *
- * 记录类型（event 里）：
- *   user/message · assistant/message · tool/call · tool/result
- *   turn/start · turn/end · system/message · developer/message · approval/request
+ * watch 事件
+ *   watch-start | snapshot | event | delta | tool-delta | watch-end
+ *
+ * 记录类型（event.record.type）
+ *   user/message      用户消息      { id, text }
+ *   assistant/message 助手消息      { id, text }（reasoning 另见片段字段）
+ *   tool/call         工具调用开始  { id, name, summary|input }
+ *   tool/result       工具返回      { id, ok|status, summary|output }
+ *   system/message · developer/message   过程说明
+ *   turn/start · turn/end                一轮开始/结束（决定 streaming）
+ *   approval/request                     需要用户确认（可点击）
+ *
+ * ★ 字段名容错 ★
+ * 插件侧的字段名我无法在本机验证，因此所有读取都走 pick() 多候选名，
+ * 拿不到就退化成空串，绝不让解析异常冒到 UI。
  */
 class DshController(private val appContext: Context) {
 
@@ -44,17 +55,23 @@ class DshController(private val appContext: Context) {
     var hostName by mutableStateOf("")
         private set
 
-    val sessionTitles = mutableStateListOf<String>()
+    /** 侧栏会话：id -> 标题 */
+    val sessions = mutableStateListOf<SessionItem>()
     val messages = mutableStateListOf<ChatMessage>()
     var currentSessionId by mutableStateOf<String?>(null)
         private set
+    var streaming by mutableStateOf(false)
+        private set
+
+    data class SessionItem(val id: String, val title: String)
+
+    /** 正在串流的那条助手消息的 id */
+    private var streamingId: String? = null
 
     // ---------------------------------------------------------------- 设备
 
-    /** 取第一台已保存的设备；没有就返回 null（UI 会提示去配） */
     fun firstDevice(): Store.Dev? = store.devices("android").firstOrNull()
 
-    /** 保存设备并立即连接（对应老客户端的「添加/编辑设备」） */
     fun saveAndConnect(dev: Store.Dev) {
         runCatching {
             store.putDevice("android", dev)
@@ -89,61 +106,53 @@ class DshController(private val appContext: Context) {
         runCatching { dsh?.close() }
         dsh = null
         connected = false
+        streaming = false
         status = "未连接"
     }
 
     // ---------------------------------------------------------------- 会话
 
+    fun refreshSessions() {
+        if (!connected) return
+        thread(name = "dsh-sessions") { loadSessions() }
+    }
+
     private fun loadSessions() {
         val d = dsh ?: return
         runCatching {
             val r = d.request("sessions.list", JSONObject(), 20000, null)
-            val arr: JSONArray = r.optJSONArray("sessions") ?: r.optJSONArray("items") ?: JSONArray()
-            val titles = ArrayList<String>()
+            val arr = pickArray(r, "sessions", "items", "list", "data")
+            val out = ArrayList<SessionItem>()
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                val t = o.optString("title").ifEmpty { o.optString("name") }
-                if (t.isNotEmpty()) titles.add(t)
+                val id = pick(o, "id", "sessionId", "key")
+                val title = pick(o, "title", "name", "label").ifEmpty { id }
+                if (id.isNotEmpty()) out.add(SessionItem(id, title))
             }
-            sessionTitles.clear()
-            sessionTitles.addAll(titles)
+            sessions.clear()
+            sessions.addAll(out)
+            status = "已连接 · ${out.size} 个会话"
         }.onFailure { status = "会话列表失败：${it.message}" }
     }
 
-    /** 打开某个会话并开始订阅（按标题匹配，找不到就原样当 id 用） */
-    fun openSession(idOrTitle: String) {
-        val d = dsh ?: return
-        val id = resolveSessionId(d, idOrTitle) ?: idOrTitle
-        currentSessionId = id
+    fun openSession(item: SessionItem) {
+        currentSessionId = item.id
         messages.clear()
-        watch(id)
+        streaming = false
+        streamingId = null
+        watch(item.id)
     }
-
-    private fun resolveSessionId(d: Dsh, key: String): String? = runCatching {
-        val r = d.request("sessions.list", JSONObject(), 20000, null)
-        val arr = r.optJSONArray("sessions") ?: r.optJSONArray("items") ?: return@runCatching null
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val t = o.optString("title").ifEmpty { o.optString("name") }
-            if (t == key) return@runCatching o.optString("id").ifEmpty { o.optString("sessionId") }
-        }
-        null
-    }.getOrNull()
 
     // ---------------------------------------------------------------- 订阅
 
     private fun watch(sessionId: String) {
         val d = dsh ?: return
-        if (watching.getAndSet(true)) {
-            return  // 已经在看别的会话；真实实现应先取消旧订阅
-        }
+        watching.set(true)
         runCatching {
-            val params = JSONObject().put("sessionId", sessionId)
-            val reqId = d.begin("sessions.watch", params)
+            val reqId = d.begin("sessions.watch", JSONObject().put("sessionId", sessionId))
             watchThread = thread(name = "dsh-watch") {
-                runCatching {
-                    d.await(reqId, 0, Dsh.EvtSink { evt, data -> onEvt(evt, data) })
-                }.onFailure { /* 连接断了，UI 上会显示状态 */ }
+                runCatching { d.await(reqId, 0, Dsh.EvtSink { evt, data -> onEvt(evt, data) }) }
+                    .onFailure { if (connected) status = "订阅中断：${it.message}" }
                 watching.set(false)
             }
         }.onFailure {
@@ -156,58 +165,146 @@ class DshController(private val appContext: Context) {
         when (evt) {
             "watch-start" -> status = "已订阅"
             "snapshot" -> {
-                val arr = data.optJSONArray("records") ?: data.optJSONArray("messages") ?: return
+                val arr = pickArray(data, "records", "messages", "items", "events")
                 messages.clear()
                 for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.let { appendRecord(it) }
+                    arr.optJSONObject(i)?.let { applyRecord(it) }
                 }
             }
-            "event" -> data.optJSONObject("record")?.let { appendRecord(it) }
-            "delta" -> appendDelta(data)
-            "tool-delta" -> Unit
-            "watch-end" -> status = "订阅结束"
+            "event" -> {
+                val rec = data.optJSONObject("record") ?: data.optJSONObject("message") ?: data
+                applyRecord(rec)
+            }
+            "delta" -> applyDelta(data)
+            "tool-delta" -> applyToolDelta(data)
+            "watch-end" -> {
+                streaming = false
+                streamingId = null
+                status = "订阅结束"
+            }
         }
     }
 
-    /** 把一条完整记录转成一条消息 */
-    private fun appendRecord(rec: JSONObject) {
-        val type = rec.optString("type")
-        val fromUser = type == "user/message"
-        val text = rec.optString("text")
-        val id = rec.optString("id").ifEmpty { "r${messages.size}" }
-        when (type) {
-            "user/message" -> messages.add(
-                ChatMessage(id = id, fromUser = true, fragments = listOf(ChatFragment.TextFragment(text)))
-            )
-            "assistant/message" -> messages.add(
-                ChatMessage(id = id, fromUser = false, fragments = listOf(ChatFragment.TextFragment(text)))
-            )
-            "tool/call" -> messages.add(
-                ChatMessage(
-                    id = id, fromUser = false,
-                    fragments = listOf(
-                        ChatFragment.ToolFragment(
-                            name = rec.optString("name").ifEmpty { "tool" },
-                            summary = rec.optString("summary").ifEmpty { rec.optString("input") },
-                            state = ToolState.Running,
-                        )
-                    ),
+    // ---------------------------------------------------------------- 记录
+
+    private fun applyRecord(rec: JSONObject) {
+        when (pick(rec, "type", "kind", "event")) {
+            "turn/start" -> {
+                streaming = true
+                // 本轮的第一条助手消息还没出现，先不建气泡
+            }
+
+            "turn/end", "turn/complete" -> {
+                streaming = false
+                streamingId?.let { id ->
+                    val i = messages.indexOfLast { it.id == id }
+                    if (i >= 0) messages[i] = messages[i].copy(streaming = false)
+                }
+                streamingId = null
+            }
+
+            "user/message" -> {
+                val id = pick(rec, "id", "messageId").ifEmpty { "u${messages.size}" }
+                messages.add(
+                    ChatMessage(
+                        id = id,
+                        fromUser = true,
+                        fragments = listOf(ChatFragment.TextFragment(pick(rec, "text", "content"))),
+                    )
                 )
-            )
-            else -> Unit
+            }
+
+            "assistant/message" -> {
+                val id = pick(rec, "id", "messageId").ifEmpty { "a${messages.size}" }
+                val frags = ArrayList<ChatFragment>()
+                pick(rec, "reasoning", "thinking").takeIf { it.isNotEmpty() }?.let {
+                    frags.add(ChatFragment.ReasoningFragment(it))
+                }
+                frags.add(ChatFragment.TextFragment(pick(rec, "text", "content")))
+                messages.add(ChatMessage(id = id, fromUser = false, fragments = frags))
+            }
+
+            "tool/call" -> {
+                val id = pick(rec, "id", "callId", "toolCallId").ifEmpty { "t${messages.size}" }
+                messages.add(
+                    ChatMessage(
+                        id = id,
+                        fromUser = false,
+                        fragments = listOf(
+                            ChatFragment.ToolFragment(
+                                name = pick(rec, "name", "tool", "toolName").ifEmpty { "tool" },
+                                summary = pick(rec, "summary", "description", "input", "command"),
+                                state = ToolState.Running,
+                            )
+                        ),
+                    )
+                )
+            }
+
+            "tool/result" -> {
+                val id = pick(rec, "id", "callId", "toolCallId", "parentId")
+                val okRaw = pick(rec, "ok", "success", "status")
+                val ok = okRaw.isEmpty() || okRaw == "true" || okRaw == "ok" || okRaw == "success"
+                val i = messages.indexOfLast {
+                    it.fragments.any { f -> f is ChatFragment.ToolFragment } &&
+                        (id.isEmpty() || it.id == id)
+                }
+                if (i >= 0) {
+                    val old = messages[i]
+                    messages[i] = old.copy(
+                        fragments = old.fragments.map { f ->
+                            if (f is ChatFragment.ToolFragment) {
+                                f.copy(
+                                    state = if (ok) ToolState.Ok else ToolState.Error,
+                                    summary = f.summary.ifEmpty {
+                                        pick(rec, "summary", "output", "result")
+                                    },
+                                )
+                            } else f
+                        }
+                    )
+                }
+            }
+
+            "system/message", "developer/message" -> {
+                val t = pick(rec, "text", "content")
+                if (t.isNotEmpty()) {
+                    messages.add(
+                        ChatMessage(
+                            id = pick(rec, "id").ifEmpty { "s${messages.size}" },
+                            fromUser = false,
+                            fragments = listOf(ChatFragment.ReasoningFragment(t)),
+                        )
+                    )
+                }
+            }
+
+            "approval/request" -> {
+                // 需要用户确认的卡片 —— 先作为一条过程行呈现（后续接按钮）
+                val t = pick(rec, "text", "prompt", "message")
+                messages.add(
+                    ChatMessage(
+                        id = pick(rec, "id").ifEmpty { "ap${messages.size}" },
+                        fromUser = false,
+                        fragments = listOf(ChatFragment.ToolFragment("需要确认", t, ToolState.Running)),
+                    )
+                )
+            }
         }
     }
 
-    /** 流式增量：同一 messageId 追加文本，遵循「字符只增不改」 */
-    private fun appendDelta(d: JSONObject) {
-        val mid = d.optString("messageId").ifEmpty { d.optString("id") }
-        val text = d.optString("text").ifEmpty { d.optString("delta") }
+    /** 流式增量：按 messageId 追加文本（字符只增不改 → 不触发整行重排） */
+    private fun applyDelta(d: JSONObject) {
+        val mid = pick(d, "messageId", "id").ifEmpty { streamingId ?: "s${messages.size}" }
+        val text = pick(d, "text", "delta", "content")
         if (text.isEmpty()) return
+        streaming = true
+        streamingId = mid
         val idx = messages.indexOfLast { it.id == mid }
         if (idx < 0) {
             messages.add(
                 ChatMessage(
-                    id = mid.ifEmpty { "s${messages.size}" },
+                    id = mid,
                     fromUser = false,
                     streaming = true,
                     fragments = listOf(ChatFragment.TextFragment(text)),
@@ -221,15 +318,26 @@ class DshController(private val appContext: Context) {
         messages[idx] = old.copy(fragments = listOf(ChatFragment.TextFragment(cur)), streaming = true)
     }
 
+    /** 工具行的流式增量 */
+    private fun applyToolDelta(d: JSONObject) {
+        val id = pick(d, "id", "callId", "toolCallId").ifEmpty { return }
+        val chunk = pick(d, "text", "delta", "output")
+        if (chunk.isEmpty()) return
+        val i = messages.indexOfLast { it.id == id }
+        if (i < 0) return
+        val old = messages[i]
+        messages[i] = old.copy(
+            fragments = old.fragments.map { f ->
+                if (f is ChatFragment.ToolFragment) f.copy(summary = f.summary + chunk) else f
+            }
+        )
+    }
+
     // ---------------------------------------------------------------- 发送
 
     fun send(text: String) {
         val d = dsh ?: run { status = "未连接"; return }
-        val sid = currentSessionId
-        if (sid == null) {
-            status = "还没有打开会话"
-            return
-        }
+        val sid = currentSessionId ?: run { status = "还没有打开会话"; return }
         // 先本地上屏，等 host 回执
         messages.add(
             ChatMessage(
@@ -238,14 +346,19 @@ class DshController(private val appContext: Context) {
                 fragments = listOf(ChatFragment.TextFragment(text)),
             )
         )
+        streaming = true
         thread(name = "dsh-send") {
             runCatching {
-                val params = JSONObject()
-                    .put("sessionId", sid)
-                    .put("text", text)
-                d.request("sessions.prompt", params, 60000, null)
+                d.request(
+                    "sessions.prompt",
+                    JSONObject().put("sessionId", sid).put("text", text),
+                    60000, null,
+                )
                 status = "已发送"
-            }.onFailure { status = "发送失败：${it.message}" }
+            }.onFailure {
+                streaming = false
+                status = "发送失败：${it.message}"
+            }
         }
     }
 
@@ -253,7 +366,30 @@ class DshController(private val appContext: Context) {
         val d = dsh ?: return
         val sid = currentSessionId ?: return
         thread(name = "dsh-cancel") {
-            runCatching { d.request("sessions.cancel", JSONObject().put("sessionId", sid), 10000, null) }
+            runCatching {
+                d.request("sessions.cancel", JSONObject().put("sessionId", sid), 10000, null)
+                streaming = false
+            }.onFailure { status = "打断失败：${it.message}" }
         }
+    }
+
+    // ---------------------------------------------------------------- 工具
+
+    /** 从多个候选字段名里取第一个非空字符串 */
+    private fun pick(o: JSONObject, vararg keys: String): String {
+        for (k in keys) {
+            if (o.has(k) && !o.isNull(k)) {
+                val s = o.optString(k, "")
+                if (s.isNotEmpty() && s != "null") return s
+            }
+        }
+        return ""
+    }
+
+    private fun pickArray(o: JSONObject, vararg keys: String): JSONArray {
+        for (k in keys) {
+            o.optJSONArray(k)?.let { return it }
+        }
+        return JSONArray()
     }
 }
