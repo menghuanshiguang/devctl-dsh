@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -374,6 +375,7 @@ private fun ChatInputCard(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = DsSpacing.screenH, vertical = DsSpacing.s2)
+            .shadow(10.dp, RoundedCornerShape(DsRadius.sheet), clip = false)
             .clip(RoundedCornerShape(DsRadius.sheet))
             .background(p.surface)
             .padding(horizontal = DsSpacing.s4, vertical = DsSpacing.s3),

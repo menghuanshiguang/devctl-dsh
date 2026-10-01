@@ -52,6 +52,9 @@ private val ThumbSize = 88.dp
 /** 动作卡尺寸 */
 private val ActionCardHeight = 88.dp
 
+/** 动作卡圆角（截图实测约 16dp） */
+private val ActionCardRadius = 16.dp
+
 @Composable
 fun UploadPanel(
     modifier: Modifier = Modifier,
@@ -72,7 +75,7 @@ fun UploadPanel(
                 Box(
                     Modifier
                         .size(ThumbSize)
-                        .clip(RoundedCornerShape(DsRadius.card))
+                        .clip(RoundedCornerShape(ActionCardRadius))
                         .background(DshTheme.p.fillStrong),
                 )
             }
@@ -80,7 +83,7 @@ fun UploadPanel(
                 Column(
                     Modifier
                         .size(ThumbSize)
-                        .clip(RoundedCornerShape(DsRadius.card))
+                        .clip(RoundedCornerShape(ActionCardRadius))
                         .background(DshTheme.p.fill)
                         .clickable(onClick = onAddMorePhotos),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -141,7 +144,7 @@ private fun UploadPanelActionButton(
     Column(
         modifier
             .height(ActionCardHeight)
-            .clip(RoundedCornerShape(DsRadius.card))
+            .clip(RoundedCornerShape(ActionCardRadius))
             .background(DshTheme.p.fill)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,

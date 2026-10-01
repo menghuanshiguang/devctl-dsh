@@ -70,6 +70,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private const val NEW_SESSION = "新的会话"
+
 private enum class Screen { Chat, Sessions, Settings }
 
 @Composable
@@ -77,7 +79,7 @@ private fun Root() {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf(Screen.Chat) }
-    var sessionTitle by remember { mutableStateOf("新的会话") }
+    var sessionTitle by remember { mutableStateOf(NEW_SESSION) }
     var deepThink by remember { mutableStateOf(false) }
     var webSearch by remember { mutableStateOf(false) }
 
@@ -129,7 +131,8 @@ private fun Root() {
 
                 Screen.Chat -> Column(Modifier.fillMaxSize()) {
                     DsTopBar(
-                        title = sessionTitle,
+                        // 原版在“新会话”状态下顶栏不显示标题（截图 1000052233 印证）
+                        title = if (sessionTitle == NEW_SESSION) "" else sessionTitle,
                         left = {
                             DsCircleButton(Icons.Filled.Menu, "菜单", {
                                 scope.launch { drawer.open() }
@@ -139,7 +142,7 @@ private fun Root() {
                             DsCircleButton(Icons.Filled.GraphicEq, "朗读", {})
                             DsCircleButton(Icons.Filled.Add, "新会话", {
                                 messages.clear()
-                                sessionTitle = "新的会话"
+                                sessionTitle = NEW_SESSION
                             })
                         },
                     )
@@ -157,7 +160,7 @@ private fun Root() {
                                     fragments = listOf(ChatFragment.TextFragment(text)),
                                 )
                             )
-                            if (sessionTitle == "新的会话") sessionTitle = text.take(12)
+                            if (sessionTitle == NEW_SESSION) sessionTitle = text.take(12)
                             messages.add(
                                 ChatMessage(
                                     id = "a${messages.size}",
