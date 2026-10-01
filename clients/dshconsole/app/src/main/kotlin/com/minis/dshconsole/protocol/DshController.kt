@@ -328,7 +328,11 @@ class DshController(private val appContext: Context) {
         val kind = pick(rec, "kind", "type", "event")
         when (kind) {
             // ---------------- 一轮的开始/结束（决定 streaming）
-            "turn-start" -> streaming = true
+            "turn-start" -> {
+                streaming = true
+                val li = messages.indexOfLast { !it.fromUser }
+                if (li >= 0) messages[li] = messages[li].copy(streaming = true)
+            }
             "turn-end", "turn/end" -> {
                 streaming = false
                 streamingId?.let { id ->
@@ -351,8 +355,19 @@ class DshController(private val appContext: Context) {
 
             // ---------------- 助手消息（含思考与工具调用）
             "assistant", "assistant/message" -> {
-                val id = pick(rec, "id", "messageId", "seq").let { if (it.isEmpty()) "a${messages.size}" else it }
+                // ★ 同一个 turn 里的多条 assistant 记录必须合并成一个气泡 ★
+                // host 每完成一步就发一条（thinking / tool / text 分开发），
+                // 每条都新建气泡的话，一轮对话会炸成一堆碎片 —— 这就是「乱」的主因。
+                val mergeIdx = if (streaming || messages.lastOrNull()?.streaming == true) {
+                    messages.indexOfLast { !it.fromUser && it.streaming }
+                } else -1
+                val id = if (mergeIdx >= 0) {
+                    messages[mergeIdx].id
+                } else {
+                    pick(rec, "id", "messageId", "seq").let { if (it.isEmpty()) "a${messages.size}" else it }
+                }
                 val frags = ArrayList<ChatFragment>()
+                if (mergeIdx >= 0) frags.addAll(messages[mergeIdx].fragments)
                 pick(rec, "reasoning", "thinking").takeIf { it.isNotEmpty() }?.let {
                     frags.add(ChatFragment.ReasoningFragment(it))
                 }
@@ -372,7 +387,13 @@ class DshController(private val appContext: Context) {
                 val text = pick(rec, "text", "content")
                 if (text.isNotEmpty()) frags.add(ChatFragment.TextFragment(text))
                 if (frags.isNotEmpty()) {
-                    messages.add(ChatMessage(id = id, fromUser = false, fragments = frags))
+                    if (mergeIdx >= 0) {
+                        messages[mergeIdx] = messages[mergeIdx].copy(fragments = frags, streaming = true)
+                        streamingId = id
+                    } else {
+                        messages.add(ChatMessage(id = id, fromUser = false, fragments = frags, streaming = streaming))
+                        if (streaming) streamingId = id
+                    }
                 }
             }
 

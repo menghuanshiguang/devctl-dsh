@@ -46,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -165,10 +166,40 @@ fun ChatScreen(
 @Composable
 private fun MessageList(messages: List<ChatMessage>, modifier: Modifier = Modifier) {
     val state = rememberLazyListState()
-    LaunchedEffect(messages.size, messages.lastOrNull()?.fragments?.size) {
+
+    // ★ 自动到底 ★
+    // 之前用 messages.size / fragments.size 当 key —— 但 delta 只改【文本长度】，
+    // 这两个数都不变，LaunchedEffect 不重跑，所以流式时永远不往下滚。
+    // 改成盯「最后一条消息的总字符数」，每来一个 token 都会变。
+    val lastLen = messages.lastOrNull()?.let { m ->
+        m.fragments.sumOf { f ->
+            when (f) {
+                is ChatFragment.TextFragment -> f.text.length
+                is ChatFragment.ReasoningFragment -> f.text.length
+                is ChatFragment.ToolFragment -> f.summary.length
+            }
+        }
+    } ?: 0
+
+    // 用户往上翻了就别拽他回去（对应 OpenMinis 的 StreamFollowDeadband）
+    val atBottom by remember {
+        derivedStateOf {
+            val info = state.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last == null || last.index >= info.totalItemsCount - 2
+        }
+    }
+
+    LaunchedEffect(messages.size, lastLen) {
+        val last = state.layoutInfo.totalItemsCount - 1
+        if (last >= 0 && atBottom) state.scrollToItem(last)
+    }
+    // 新消息进来时（用户自己发的）无条件跳到底
+    LaunchedEffect(messages.size) {
         val last = state.layoutInfo.totalItemsCount - 1
         if (last >= 0) state.scrollToItem(last)
     }
+
     LazyColumn(
         state = state,
         modifier = modifier.fillMaxWidth(),
@@ -176,7 +207,7 @@ private fun MessageList(messages: List<ChatMessage>, modifier: Modifier = Modifi
             horizontal = DsSpacing.screenH,
             vertical = DsSpacing.s4,
         ),
-        verticalArrangement = Arrangement.spacedBy(DsSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(DsSpacing.s3),
     ) {
         items(messages, key = { it.id }) { msg ->
             Box(Modifier.fillMaxWidth().animateItem()) {
