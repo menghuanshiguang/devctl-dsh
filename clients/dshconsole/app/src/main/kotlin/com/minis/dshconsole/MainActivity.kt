@@ -131,10 +131,12 @@ private fun RootBody(prefs: DshPrefs, controller: DshController) {
         onClose = { drawerOpen = false },
         drawerContent = {
             ChatNavigationDrawerContent(
-                sessions = controller.visibleSessions,
+                sessions = controller.sessions,
                 workspaces = controller.workspaces,
                 selectedWorkspaceId = controller.selectedWorkspaceId,
-                onSelectWorkspace = { controller.selectWorkspace(it) },
+                expandedIds = controller.expandedWorkspaces,
+                sessionsOf = { controller.sessionsOf(it) },
+                onToggleWorkspace = { controller.toggleWorkspace(it) },
                 connected = controller.connected,
                 accountName = controller.hostName.ifEmpty { "未连接" },
                 selectedId = controller.currentSessionId,

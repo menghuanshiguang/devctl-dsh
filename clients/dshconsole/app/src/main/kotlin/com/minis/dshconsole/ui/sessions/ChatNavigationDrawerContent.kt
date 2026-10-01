@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.minis.dshconsole.ui.theme.DsRadius
 import com.minis.dshconsole.protocol.DshController
+import androidx.compose.material.icons.filled.Workspaces
+import androidx.compose.material.icons.filled.ExpandMore
 import com.minis.dshconsole.ui.DsStr
 import com.minis.dshconsole.ui.components.DsSearchBar
 import com.minis.dshconsole.ui.theme.DsSpacing
@@ -60,7 +62,9 @@ fun ChatNavigationDrawerContent(
     sessions: List<DshController.SessionItem>,
     workspaces: List<DshController.WorkspaceItem>,
     selectedWorkspaceId: String?,
-    onSelectWorkspace: (String) -> Unit,
+    expandedIds: List<String>,
+    sessionsOf: (DshController.WorkspaceItem) -> List<DshController.SessionItem>,
+    onToggleWorkspace: (String) -> Unit,
     accountName: String,
     modifier: Modifier = Modifier,
     showAccount: Boolean = true,
@@ -97,44 +101,63 @@ fun ChatNavigationDrawerContent(
 
         // ---------- L1 分组 + L2 会话
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            // ---------------- L1 工作区（点了才显示它的会话）
+            // ---------------- 树形：工作区 → 下伸子列表
             if (workspaces.isNotEmpty()) {
                 item(key = "ws_header") {
                     SessionGroupHeader(label = "工作区", showSortIcon = false)
                 }
-                itemsIndexed(workspaces, key = { idx, w -> "ws_" + w.id + "#" + idx }) { _, w ->
-                    ChatSessionItem(
-                        title = w.title.ifEmpty { w.path },
-                        selected = w.id == selectedWorkspaceId,
-                        onClick = { onSelectWorkspace(w.id) },
-                        subtitle = "${w.sessionIds.size} 个会话",
-                    )
+                workspaces.forEach { w ->
+                    val expanded = expandedIds.contains(w.id)
+                    item(key = "ws_" + w.id) {
+                        WorkspaceRow(
+                            title = w.title.ifEmpty { w.path },
+                            subtitle = "${w.sessionIds.size} 个会话",
+                            expanded = expanded,
+                            selected = w.id == selectedWorkspaceId,
+                            onClick = { onToggleWorkspace(w.id) },
+                        )
+                    }
+                    if (expanded) {
+                        val kids = sessionsOf(w)
+                        if (kids.isEmpty()) {
+                            item(key = "ws_empty_" + w.id) {
+                                SubRow(text = "该工作区暂无会话", muted = true, onClick = {})
+                            }
+                        } else {
+                            kids.forEachIndexed { k, sess ->
+                                item(key = "s_" + w.id + "_" + k + "_" + sess.id) {
+                                    SubRow(
+                                        text = sess.title,
+                                        muted = false,
+                                        selected = sess.id == selectedId,
+                                        onClick = { onOpenSession(sess) },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 item(key = "ws_gap") { Spacer(Modifier.height(DsSpacing.s3)) }
-            }
-
-            if (sessions.isEmpty()) {
-                item {
-                    Text(
-                        if (connected) "没有会话" else "未连接",
-                        style = DsType.rowSubtitle,
-                        color = DshTheme.p.textPlaceholder,
-                        modifier = Modifier.padding(horizontal = DsSpacing.screenH, vertical = DsSpacing.s4),
-                    )
-                }
             } else {
-                item(key = "group_header") {
-                    SessionGroupHeader(
-                        label = if (workspaces.isEmpty()) "会话" else "工作区会话",
-                        showSortIcon = true,
-                    )
-                }
-                itemsIndexed(sessions, key = { idx, it -> it.id + "#" + idx }) { _, it ->
-                    ChatSessionItem(
-                        title = it.title,
-                        selected = it.id == selectedId,
-                        onClick = { onOpenSession(it) },
-                    )
+                // 老 host 没有工作区：退化成平铺会话
+                if (sessions.isEmpty()) {
+                    item {
+                        Text(
+                            if (connected) "没有会话" else "未连接",
+                            style = DsType.rowSubtitle,
+                            color = DshTheme.p.textPlaceholder,
+                            modifier = Modifier.padding(horizontal = DsSpacing.screenH, vertical = DsSpacing.s4),
+                        )
+                    }
+                } else {
+                    item(key = "group_header") { SessionGroupHeader(label = "会话", showSortIcon = true) }
+                    itemsIndexed(sessions, key = { idx, it -> it.id + "#" + idx }) { _, it ->
+                        ChatSessionItem(
+                            title = it.title,
+                            selected = it.id == selectedId,
+                            onClick = { onOpenSession(it) },
+                        )
+                    }
                 }
             }
             item { Spacer(Modifier.height(DsSpacing.s4)) }
@@ -295,6 +318,109 @@ fun SessionGroupHeader(
                 "排序",
                 tint = DshTheme.p.textPlaceholder,
                 modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 工作区行 —— 树形的父节点。
+ * 右边一个会转的 chevron：收起时指向右，展开时指向下。
+ */
+@Composable
+fun WorkspaceRow(
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val p = DshTheme.p
+    val bg = if (selected) p.brandSoft else Color.Transparent
+    val fg = if (selected) p.brand else p.textPrimary
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(RadiiPill))
+                .background(bg)
+                .clickable(onClick = onClick)
+                .padding(start = 6.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Workspaces,
+                null,
+                tint = fg,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = DsType.sessionTitle, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, style = DsType.rowSubtitle, color = if (selected) p.brand else p.textSecondary, maxLines = 1)
+            }
+            Icon(
+                if (expanded) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                if (expanded) "收起" else "展开",
+                tint = p.textPlaceholder,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 子列表行 —— 树形的叶节点。
+ * 左侧加一条竖直引导线 + 缩进，层级一眼可辨。
+ */
+@Composable
+fun SubRow(
+    text: String,
+    muted: Boolean,
+    onClick: () -> Unit,
+    selected: Boolean = false,
+) {
+    val p = DshTheme.p
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 34.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 引导线
+        Box(
+            Modifier
+                .width(1.5.dp)
+                .height(40.dp)
+                .background(p.divider)
+        )
+        Spacer(Modifier.width(14.dp))
+        Box(
+            Modifier
+                .weight(1f)
+                .heightIn(min = 44.dp)
+                .clip(RoundedCornerShape(RadiiPill))
+                .background(if (selected) p.brandSoft else Color.Transparent)
+                .clickable(onClick = onClick)
+                .padding(start = 12.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text,
+                style = DsType.sessionTitle,
+                color = when {
+                    selected -> p.brand
+                    muted -> p.textPlaceholder
+                    else -> p.textPrimary
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

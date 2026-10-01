@@ -76,6 +76,24 @@ class DshController(private val appContext: Context) {
     fun selectWorkspace(id: String) {
         selectedWorkspaceId = id
     }
+
+    /** 树形展开：哪些工作区当前是展开的 */
+    val expandedWorkspaces = mutableStateListOf<String>()
+
+    fun isExpanded(id: String) = expandedWorkspaces.contains(id)
+
+    /** 点工作区 = 展开/收起它的子列表（同时记成「当前工作区」） */
+    fun toggleWorkspace(id: String) {
+        selectedWorkspaceId = id
+        if (!expandedWorkspaces.remove(id)) expandedWorkspaces.add(id)
+    }
+
+    /** 某个工作区下的会话 */
+    fun sessionsOf(w: WorkspaceItem): List<SessionItem> {
+        if (w.sessionIds.isEmpty()) return sessions      // 老 host 没给 ids：退化成全部
+        val set = w.sessionIds.toHashSet()
+        return sessions.filter { it.id in set }
+    }
     val messages = mutableStateListOf<ChatMessage>()
     var currentSessionId by mutableStateOf<String?>(null)
         private set
