@@ -42,11 +42,11 @@ import kotlin.math.roundToInt
  *
  * 对照真机录屏（1000052245）逐帧还原：
  *   ① 主内容作为一整块【带圆角的白色面板】向右平移，位移量 = 抽屉宽 × 进度；
- *   ② 左边缘两角大圆角 ≈28dp，随进度线性增长；
+ *   ② 左边缘两角大圆角 ≈28dp，【全程恒定】不随进度缩放；
  *   ③ 抽屉宽度 ≈屏宽 82%；
  *   ④ **没有蒙层** —— 抽屉自始至终是清晰白底，不压暗；
  *      主内容左边缘只有一道细投影作为接缝；
- *   ⑤ 是平移不是缩放。
+ *   ⑤ 平移 **同时向左边缘轻微收缩**（scale 1 → 0.92，锚点 = 左边缘中点）。
  *   ⑥ 弹簧参数取自原包 smali（zz7.smali 常量表）：
  *      spring(dampingRatio = 1.0f, stiffness = 1400f)
  *
@@ -60,6 +60,9 @@ import kotlin.math.roundToInt
  *   · 所有 animateTo 都 catch 掉 CancellationException；
  *   · drawerPx 为 0 时直接跳过，避免除零。
  */
+
+/** 内容被推开时向左边缘收缩的比例（满开时 1 - 0.08 = 0.92） */
+private const val ContentScaleAmount = 0.08f
 
 /** 抽屉宽度占屏宽的比例（截图实测 ≈82%） */
 private const val DrawerWidthFraction = 0.82f
