@@ -318,14 +318,18 @@ class DshController(private val appContext: Context) {
 
     // ---------------------------------------------------------------- 记录
 
+    /**
+     * 把一条记录（describeEvent/describeRecord 的产物）落到消息列表。
+     *
+     * ★ 字段是 kind，不是 type ★（值是 user / assistant / tool-call / tool-result /
+     *   inbox / turn-start / turn-end / event —— 来自插件 index.js:1458 describeEvent）
+     */
     private fun applyRecord(rec: JSONObject) {
-        when (pick(rec, "type", "kind", "event")) {
-            "turn/start" -> {
-                streaming = true
-                // 本轮的第一条助手消息还没出现，先不建气泡
-            }
-
-            "turn/end", "turn/complete" -> {
+        val kind = pick(rec, "kind", "type", "event")
+        when (kind) {
+            // ---------------- 一轮的开始/结束（决定 streaming）
+            "turn-start" -> streaming = true
+            "turn-end", "turn/end" -> {
                 streaming = false
                 streamingId?.let { id ->
                     val i = messages.indexOfLast { it.id == id }
@@ -334,29 +338,48 @@ class DshController(private val appContext: Context) {
                 streamingId = null
             }
 
-            "user/message" -> {
-                val id = pick(rec, "id", "messageId").ifEmpty { "u${messages.size}" }
-                messages.add(
-                    ChatMessage(
-                        id = id,
-                        fromUser = true,
-                        fragments = listOf(ChatFragment.TextFragment(pick(rec, "text", "content"))),
+            // ---------------- 用户消息
+            "user", "user/message" -> {
+                val text = pick(rec, "text", "content")
+                val id = pick(rec, "id", "messageId", "seq").let { if (it.isEmpty()) "u${messages.size}" else it }
+                if (text.isNotEmpty()) {
+                    messages.add(
+                        ChatMessage(id = id, fromUser = true, fragments = listOf(ChatFragment.TextFragment(text)))
                     )
-                )
+                }
             }
 
-            "assistant/message" -> {
-                val id = pick(rec, "id", "messageId").ifEmpty { "a${messages.size}" }
+            // ---------------- 助手消息（含思考与工具调用）
+            "assistant", "assistant/message" -> {
+                val id = pick(rec, "id", "messageId", "seq").let { if (it.isEmpty()) "a${messages.size}" else it }
                 val frags = ArrayList<ChatFragment>()
                 pick(rec, "reasoning", "thinking").takeIf { it.isNotEmpty() }?.let {
                     frags.add(ChatFragment.ReasoningFragment(it))
                 }
-                frags.add(ChatFragment.TextFragment(pick(rec, "text", "content")))
-                messages.add(ChatMessage(id = id, fromUser = false, fragments = frags))
+                // calls: 本条消息里发起的工具调用
+                rec.optJSONArray("calls")?.let { arr ->
+                    for (k in 0 until arr.length()) {
+                        val c = arr.optJSONObject(k) ?: continue
+                        frags.add(
+                            ChatFragment.ToolFragment(
+                                name = pick(c, "name", "tool", "toolName").ifEmpty { "tool" },
+                                summary = pick(c, "summary", "description", "input"),
+                                state = ToolState.Ok,
+                            )
+                        )
+                    }
+                }
+                val text = pick(rec, "text", "content")
+                if (text.isNotEmpty()) frags.add(ChatFragment.TextFragment(text))
+                if (frags.isNotEmpty()) {
+                    messages.add(ChatMessage(id = id, fromUser = false, fragments = frags))
+                }
             }
 
-            "tool/call" -> {
-                val id = pick(rec, "id", "callId", "toolCallId").ifEmpty { "t${messages.size}" }
+            // ---------------- 工具调用 / 结果
+            "tool-call", "tool/call" -> {
+                val id = pick(rec, "id", "callId", "toolCallId", "seq")
+                    .let { if (it.isEmpty()) "t${messages.size}" else it }
                 messages.add(
                     ChatMessage(
                         id = id,
@@ -372,10 +395,10 @@ class DshController(private val appContext: Context) {
                 )
             }
 
-            "tool/result" -> {
+            "tool-result", "tool/result" -> {
                 val id = pick(rec, "id", "callId", "toolCallId", "parentId")
                 val okRaw = pick(rec, "ok", "success", "status")
-                val ok = okRaw.isEmpty() || okRaw == "true" || okRaw == "ok" || okRaw == "success"
+                val ok = okRaw.isEmpty() || okRaw == "true" || okRaw == "ok" || okRaw == "success" || okRaw == "done"
                 val i = messages.indexOfLast {
                     it.fragments.any { f -> f is ChatFragment.ToolFragment } &&
                         (id.isEmpty() || it.id == id)
@@ -387,9 +410,7 @@ class DshController(private val appContext: Context) {
                             if (f is ChatFragment.ToolFragment) {
                                 f.copy(
                                     state = if (ok) ToolState.Ok else ToolState.Error,
-                                    summary = f.summary.ifEmpty {
-                                        pick(rec, "summary", "output", "result")
-                                    },
+                                    summary = f.summary.ifEmpty { pick(rec, "summary", "output", "result") },
                                 )
                             } else f
                         }
@@ -397,29 +418,18 @@ class DshController(private val appContext: Context) {
                 }
             }
 
-            "system/message", "developer/message" -> {
+            // ---------------- 其它（保留但不进消息流）
+            else -> {
                 val t = pick(rec, "text", "content")
-                if (t.isNotEmpty()) {
+                if (t.isNotEmpty() && kind != "event") {
                     messages.add(
                         ChatMessage(
-                            id = pick(rec, "id").ifEmpty { "s${messages.size}" },
+                            id = pick(rec, "id", "seq").let { if (it.isEmpty()) "x${messages.size}" else it },
                             fromUser = false,
                             fragments = listOf(ChatFragment.ReasoningFragment(t)),
                         )
                     )
                 }
-            }
-
-            "approval/request" -> {
-                // 需要用户确认的卡片 —— 先作为一条过程行呈现（后续接按钮）
-                val t = pick(rec, "text", "prompt", "message")
-                messages.add(
-                    ChatMessage(
-                        id = pick(rec, "id").ifEmpty { "ap${messages.size}" },
-                        fromUser = false,
-                        fragments = listOf(ChatFragment.ToolFragment("需要确认", t, ToolState.Running)),
-                    )
-                )
             }
         }
     }
