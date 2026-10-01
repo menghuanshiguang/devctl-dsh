@@ -43,7 +43,7 @@ import kotlin.math.roundToInt
  *   ② 主内容整体**向右平移**（位移量 = 抽屉宽度 × 进度），
  *      并在**左侧两角**加上大圆角（topStart / bottomStart），
  *      看起来像一张卡片被推开；
- *   ③ 抽屉宽度约为屏宽的 62%（截图量得右边缘在 x≈745/1216）；
+ *   ③ 抽屉宽度约为屏宽的 82%（截图量得右边缘在 x≈750/920）；
  *   ④ **没有蒙层** —— 录屏逐帧看，抽屉自始至终是清晰白底，不压暗；
 *      主内容左边缘有一道细投影作为接缝。
  *
@@ -51,8 +51,8 @@ import kotlin.math.roundToInt
  * 进度用 Animatable 驱动，支持从左边缘拖拽。
  */
 
-/** 抽屉宽度占屏宽的比例（截图实测 ≈62%） */
-private const val DrawerWidthFraction = 0.62f
+/** 抽屉宽度占屏宽的比例（截图实测 ≈82%） */
+private const val DrawerWidthFraction = 0.82f
 
 /** 主内容左边缘的投影（录屏里抽屉与内容之间有一道细接缝） */
 private val ContentShadow = 8.dp

@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.minis.dshconsole.ui.theme.DsRadius
 import com.minis.dshconsole.ui.DsStr
 import com.minis.dshconsole.ui.components.DsSearchBar
 import com.minis.dshconsole.ui.theme.DsSpacing
@@ -56,6 +58,8 @@ fun ChatNavigationDrawerContent(
     accountName: String,
     modifier: Modifier = Modifier,
     showAccount: Boolean = true,
+    selectedTitle: String? = null,
+    selectedGroup: String? = null,
     onOpenSession: (String) -> Unit = {},
     onOpenAccountMenu: () -> Unit = {},
     onSearch: () -> Unit = {},
@@ -87,7 +91,11 @@ fun ChatNavigationDrawerContent(
                     )
                 }
                 itemsIndexed(sessions, key = { idx, _ -> label + "_" + idx }) { _, title ->
-                    ChatSessionItem(title = title, onClick = { onOpenSession(title) })
+                    ChatSessionItem(
+                        title = title,
+                        selected = title == selectedTitle && label == selectedGroup,
+                        onClick = { onOpenSession(title) },
+                    )
                 }
             }
             item { Spacer(Modifier.height(DsSpacing.s4)) }
@@ -172,23 +180,57 @@ fun SessionGroupHeader(
     }
 }
 
-/** 对应 ChatSessionItem.kt —— L2 会话条目 */
+/** 对应 ChatSessionItem.kt —— L2 会话条目（含选中态） */
 @Composable
 fun ChatSessionItem(
     title: String,
     modifier: Modifier = Modifier,
+    selected: Boolean = false,
     onClick: () -> Unit = {},
+    onMore: () -> Unit = {},
 ) {
-    Text(
-        title,
-        style = DsType.sessionTitle,
-        color = DshTheme.p.textPrimary,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+    val p = DshTheme.p
+    // 截图实测：选中项 = 淡蓝胶囊底 + 品牌蓝文字 + 右侧 ··· 按钮
+    val bg = if (selected) p.brandSoft else androidx.compose.ui.graphics.Color.Transparent
+    val fg = if (selected) p.brand else p.textPrimary
+    Row(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = DsSpacing.s3)
+            .clip(RoundedCornerShape(DsRadius.pill))
+            .background(bg)
             .clickable(onClick = onClick)
-            .padding(horizontal = DsSpacing.screenH)
-            .padding(vertical = 15.dp),
-    )
+            .padding(
+                start = DsSpacing.screenH - DsSpacing.s3,
+                end = DsSpacing.s1,
+                top = 15.dp,
+                bottom = 15.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = DsType.sessionTitle,
+            color = fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Box(
+                Modifier
+                    .size(DsSpacing.touch)
+                    .clip(CircleShape)
+                    .clickable(onClick = onMore),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.MoreHoriz,
+                    "更多",
+                    tint = p.brand,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
 }

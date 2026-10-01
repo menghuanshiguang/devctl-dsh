@@ -88,6 +88,7 @@ private fun Root() {
 
     val sessionGroups = remember {
         listOf(
+            "今天" to listOf("你好"),
             "7 天内" to listOf("工具调用配对报错", "ProcessGovernor补丁验证"),
             "30 天内" to listOf("雷霆战机游戏代码", "你好", "你好", "你好", "申请理由范文", "LSA阻止加载DLL"),
             "2026年8月" to listOf("海阔天空1992原稿", "打招呼问候"),
@@ -104,6 +105,8 @@ private fun Root() {
             ChatNavigationDrawerContent(
                 groups = sessionGroups,
                 accountName = "faerydewiee",
+                selectedTitle = sessionTitle,
+                selectedGroup = "今天",
                 onOpenSession = { t ->
                     sessionTitle = t
                     screen = Screen.Chat
