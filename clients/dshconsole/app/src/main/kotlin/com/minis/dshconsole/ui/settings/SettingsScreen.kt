@@ -69,7 +69,7 @@ fun SettingsScreen(
     Column(
         modifier
             .fillMaxSize()
-            .background(DsColor.BgGrouped.takeIf { DshTheme.p.bg == DsColor.BgGrouped } ?: DshTheme.p.bg)
+            .background(groupedBg())
     ) {
         DsTopBar(
             title = "设置",
@@ -196,6 +196,15 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * 分组页底色 —— 设置/数据/主机这几页用 #F8F8F8（暗色 #0F0F0F），
+ * 靠白色卡片区分层级；聊天页才用纯白。
+ * ★ 这几页必须用灰色底，否则白卡白底 = 圆角与边距全部看不见 ★
+ */
+@Composable
+private fun groupedBg() =
+    if (DshTheme.p.bg == DsColor.DarkBg) DsColor.DarkBg else DsColor.BgGrouped
+
 /** Token 统计页 */
 @Composable
 fun TokenStatsScreen(
@@ -206,7 +215,7 @@ fun TokenStatsScreen(
     Column(
         modifier
             .fillMaxSize()
-            .background(DshTheme.p.bg)
+            .background(groupedBg())
     ) {
         DsTopBar(
             title = "数据管理",
@@ -271,7 +280,7 @@ fun HostInfoScreen(
     Column(
         modifier
             .fillMaxSize()
-            .background(DshTheme.p.bg)
+            .background(groupedBg())
     ) {
         DsTopBar(
             title = "主机信息",
