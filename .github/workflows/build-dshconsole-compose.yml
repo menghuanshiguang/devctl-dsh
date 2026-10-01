@@ -1,0 +1,94 @@
+name: Build DSHConsole (Compose UI)
+
+# DSHConsole 的 UI 已改用 DeepSeek 客户端同款技术栈（Jetpack Compose）。
+# 所有编译都放在这里跑 —— x86_64 runner 上 AAPT2/D8/R8 原生可用，不依赖任何本地环境。
+on:
+  push:
+    branches: [ 'feat/deepseek-ui', 'main' ]
+    paths:
+      - 'clients/dshconsole/**'
+      - '.github/workflows/build-dshconsole-compose.yml'
+  pull_request:
+    paths:
+      - 'clients/dshconsole/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_VERSION: "8.14.3"
+  WORKDIR: clients/dshconsole
+
+jobs:
+  build:
+    name: assembleRelease (Compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Show toolchain
+        run: |
+          java -version
+          gradle --version
+
+      - name: Build release APK
+        working-directory: ${{ env.WORKDIR }}
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -euo pipefail
+          f=$(find "$WORKDIR/app/build/outputs/apk" -name '*.apk' | head -1)
+          echo "path=$f" >> "$GITHUB_OUTPUT"
+          ls -l "$f"
+          echo "md5: $(md5sum "$f" | cut -d' ' -f1)"
+
+      - name: Summary
+        if: always()
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
+        run: |
+          {
+            echo "## DSHConsole (Compose UI)"
+            echo ""
+            if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+              echo 'APK: `'"$APK_PATH"'`'
+              echo ""
+              echo '```'
+              ls -l "$APK_PATH"
+              md5sum "$APK_PATH"
+              AAPT2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -r | head -1)
+              "$AAPT2" dump badging "$APK_PATH" 2>/dev/null | head -4
+              echo '```'
+            else
+              echo "构建失败，见上方日志"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dshconsole-compose-apk
+          path: ${{ env.WORKDIR }}/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+          retention-days: 30
