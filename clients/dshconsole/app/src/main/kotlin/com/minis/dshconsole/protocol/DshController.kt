@@ -64,10 +64,13 @@ class DshController(private val appContext: Context) {
     /** 当前工作区下的会话（工作区用 sessionIds 反查；没有工作区就全部平铺） */
     val visibleSessions: List<SessionItem>
         get() {
+            if (workspaces.isEmpty()) return sessions
             val ws = workspaces.firstOrNull { it.id == selectedWorkspaceId } ?: return sessions
-            if (ws.sessionIds.isEmpty()) return emptyList()
+            // 工作区没带 sessionIds，或反查不出任何会话 —— 都退回全部，避免列表空白
+            if (ws.sessionIds.isEmpty()) return sessions
             val set = ws.sessionIds.toHashSet()
-            return sessions.filter { it.id in set }
+            val hit = sessions.filter { it.id in set }
+            return hit.ifEmpty { sessions }
         }
 
     fun selectWorkspace(id: String) {
@@ -190,6 +193,10 @@ class DshController(private val appContext: Context) {
                 selectedWorkspaceId = ws.firstOrNull()?.id
             }
             dbg("工作区 ${ws.size} 个，选中 ${selectedWorkspaceId ?: "-"}")
+            ws.take(3).forEach { w ->
+                dbg("  ws=${w.id} title=${w.title} sessionIds=${w.sessionIds.size} " +
+                    "样本=${w.sessionIds.take(2)}")
+            }
         }.onFailure { dbg("workspaces.list 失败：${it.message}") }
 
         runCatching {
@@ -207,6 +214,7 @@ class DshController(private val appContext: Context) {
             }
             sessions.clear()
             sessions.addAll(out)
+            dbg("会话 ${out.size} 个，样本 id=${out.take(2).map { it.id }}")
             status = "已连接 · ${out.size} 个会话"
         }.onFailure { status = "会话列表失败：${it.message}" }
     }

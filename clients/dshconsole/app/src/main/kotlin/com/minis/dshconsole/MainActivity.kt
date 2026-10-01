@@ -138,9 +138,9 @@ private fun RootBody(prefs: DshPrefs, controller: DshController) {
                 connected = controller.connected,
                 accountName = controller.hostName.ifEmpty { "未连接" },
                 selectedId = controller.currentSessionId,
-                onOpenSession = { it ->
-                    sessionTitle = it.title
-                    controller.openSession(it)
+                onOpenSession = { item ->
+                    sessionTitle = item.title
+                    controller.openSession(item)   // 选中 + tail 拉历史 + watch 订阅
                     screen = Screen.Chat
                     drawerOpen = false
                 },

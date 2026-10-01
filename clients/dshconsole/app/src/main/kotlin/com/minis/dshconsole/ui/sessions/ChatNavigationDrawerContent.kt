@@ -87,6 +87,14 @@ fun ChatNavigationDrawerContent(
         )
         Spacer(Modifier.height(DsSpacing.s2))
 
+        // 诊断用计数条（一眼看出数据到底有没有到）
+        Text(
+            "工作区 ${workspaces.size} · 会话 ${sessions.size} · 选中 ${selectedId?.take(8) ?: "—"}",
+            style = DsType.rowSubtitle,
+            color = DshTheme.p.textPlaceholder,
+            modifier = Modifier.padding(horizontal = DsSpacing.screenH, vertical = 2.dp),
+        )
+
         // ---------- L1 分组 + L2 会话
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             // ---------------- L1 工作区（点了才显示它的会话）
@@ -94,7 +102,7 @@ fun ChatNavigationDrawerContent(
                 item(key = "ws_header") {
                     SessionGroupHeader(label = "工作区", showSortIcon = false)
                 }
-                itemsIndexed(workspaces, key = { _, w -> "ws_" + w.id }) { _, w ->
+                itemsIndexed(workspaces, key = { idx, w -> "ws_" + w.id + "#" + idx }) { _, w ->
                     ChatSessionItem(
                         title = w.title.ifEmpty { w.path },
                         selected = w.id == selectedWorkspaceId,
@@ -121,7 +129,7 @@ fun ChatNavigationDrawerContent(
                         showSortIcon = true,
                     )
                 }
-                itemsIndexed(sessions, key = { _, it -> it.id }) { _, it ->
+                itemsIndexed(sessions, key = { idx, it -> it.id + "#" + idx }) { _, it ->
                     ChatSessionItem(
                         title = it.title,
                         selected = it.id == selectedId,
