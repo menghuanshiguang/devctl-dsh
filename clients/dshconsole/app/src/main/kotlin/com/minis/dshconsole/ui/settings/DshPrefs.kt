@@ -44,12 +44,12 @@ class DshPrefs(context: Context) {
         sp.edit().putString("theme", m.name).apply()
     }
 
-    fun setFontScale(f: Float) {
+    fun applyFontScale(f: Float) {
         fontScale = f
         sp.edit().putFloat("fontScale", f).apply()
     }
 
-    fun setLang(l: Lang) {
+    fun applyLang(l: Lang) {
         lang = l
         DsStr.zh = (l == Lang.Zh)
         sp.edit().putString("lang", l.name).apply()
@@ -60,7 +60,7 @@ class DshPrefs(context: Context) {
         DsStr.zh = (lang == Lang.Zh)
     }
 
-    fun setStreamPlainText(v: Boolean) {
+    fun applyStreamPlainText(v: Boolean) {
         streamPlainText = v
         sp.edit().putBoolean("streamPlain", v).apply()
     }

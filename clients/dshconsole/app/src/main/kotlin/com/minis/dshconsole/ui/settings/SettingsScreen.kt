@@ -140,7 +140,7 @@ fun SettingsScreen(
                     icon = Icons.Filled.Language,
                     onClick = {
                         val next = if (prefs.lang == DshPrefs.Lang.Zh) DshPrefs.Lang.En else DshPrefs.Lang.Zh
-                        prefs.setLang(next)          // 本地立刻生效
+                        prefs.applyLang(next)          // 本地立刻生效
                         onSyncLang(next)             // 同时同步给 host
                     },
                 )
@@ -173,7 +173,7 @@ fun SettingsScreen(
                     },
                     icon = Icons.Filled.FormatSize,
                     onClick = {
-                        prefs.setFontScale(
+                        prefs.applyFontScale(
                             when {
                                 prefs.fontScale < 0.97f -> 1.0f
                                 prefs.fontScale > 1.08f -> 0.9f
