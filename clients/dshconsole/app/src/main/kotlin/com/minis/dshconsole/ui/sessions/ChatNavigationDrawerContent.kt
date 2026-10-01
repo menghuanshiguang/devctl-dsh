@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -85,7 +86,7 @@ fun ChatNavigationDrawerContent(
                         showSortIcon = gi == 0,
                     )
                 }
-                items(sessions, key = { "${label}_$it" }) { title ->
+                itemsIndexed(sessions, key = { gi2, idx, _ -> "${label}_$gi2_$idx" }) { _, title ->
                     ChatSessionItem(title = title, onClick = { onOpenSession(title) })
                 }
             }

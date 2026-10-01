@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -75,8 +76,7 @@ fun SessionListScreen(
                         )
                     }
                 }
-                items(items.size) { idx ->
-                    val title = items[idx]
+                itemsIndexed(items, key = { i2, _ -> "${label}_$i2" }) { _, title ->
                     Text(
                         title,
                         style = DsType.sessionTitle,
