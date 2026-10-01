@@ -92,7 +92,8 @@ private fun Root() {
     var deepThink by remember { mutableStateOf(false) }
     var webSearch by remember { mutableStateOf(false) }
 
-    val controller = remember { DshController(applicationContext) }
+    val ctx = LocalContext.current
+    val controller = remember { DshController(ctx.applicationContext) }
     val messages = controller.messages
 
     // 进来就尝试连上已保存的第一台设备
