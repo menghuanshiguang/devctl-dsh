@@ -134,13 +134,6 @@ fun SettingsScreen(
             DsSectionLabel("应用")
             DsGroupCard {
                 DsRow(
-                    "语言",
-                    value = if (prefs.lang == DshPrefs.Lang.Zh) "中文（简体中文）" else "English",
-                    icon = Icons.Filled.Language,
-                    onClick = { prefs.setLang(if (prefs.lang == DshPrefs.Lang.Zh) DshPrefs.Lang.En else DshPrefs.Lang.Zh) },
-                )
-                DsRowDivider()
-                DsRow(
                     "外观",
                     value = when (prefs.themeMode) {
                         DshPrefs.ThemeMode.System -> "系统"
@@ -176,25 +169,6 @@ fun SettingsScreen(
                             }
                         )
                     },
-                )
-                DsRowDivider()
-                DsRow(
-                    "个性化",
-                    subtitle = if (prefs.streamPlainText) "流式期间纯文本追加（不重排）" else "流式期间实时解析 Markdown",
-                    icon = Icons.Filled.Star,
-                    showChevron = false,
-                    trailing = {
-                        Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-                            if (prefs.streamPlainText) {
-                                Icon(
-                                    Icons.Filled.Check, "已开启",
-                                    tint = DshTheme.p.brand,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                    },
-                    onClick = { prefs.setStreamPlainText(!prefs.streamPlainText) },
                 )
             }
             Spacer(Modifier.height(DsSpacing.cardGap))
