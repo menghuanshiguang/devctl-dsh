@@ -44,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.minis.dshconsole.ui.sessions.ChatNavigationDrawerContent
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import com.minis.dshconsole.protocol.DshController
 import com.minis.dshconsole.ui.chat.ChatFragment
 import com.minis.dshconsole.ui.chat.ChatMessage
 import com.minis.dshconsole.ui.chat.ChatScreen
@@ -89,15 +92,18 @@ private fun Root() {
     var deepThink by remember { mutableStateOf(false) }
     var webSearch by remember { mutableStateOf(false) }
 
-    val messages = remember { mutableStateListOf<ChatMessage>() }
+    val controller = remember { DshController(applicationContext) }
+    val messages = controller.messages
 
-    val sessionGroups = remember {
-        listOf(
-            "今天" to listOf("你好"),
-            "7 天内" to listOf("工具调用配对报错", "ProcessGovernor补丁验证"),
-            "30 天内" to listOf("雷霆战机游戏代码", "你好", "你好", "你好", "申请理由范文", "LSA阻止加载DLL"),
-            "2026年8月" to listOf("海阔天空1992原稿", "打招呼问候"),
-        )
+    // 进来就尝试连上已保存的第一台设备
+    LaunchedEffect(Unit) {
+        controller.firstDevice()?.let { controller.connect(it) }
+    }
+
+    val sessionTitles = controller.sessionTitles
+    val sessionGroups = remember(sessionTitles.toList()) {
+        if (sessionTitles.isEmpty()) emptyList()
+        else listOf("会话" to sessionTitles.toList())
     }
 
     BackHandler(enabled = screen != Screen.Chat) { screen = Screen.Chat }
@@ -114,6 +120,7 @@ private fun Root() {
                 selectedGroup = "今天",
                 onOpenSession = { t ->
                     sessionTitle = t
+                    controller.openSession(t)
                     screen = Screen.Chat
                     drawerOpen = false
                 },
@@ -183,41 +190,7 @@ private fun Root() {
                         webSearch = webSearch,
                         onToggleThink = { deepThink = !deepThink },
                         onToggleSearch = { webSearch = !webSearch },
-                        onSend = { text ->
-                            messages.add(
-                                ChatMessage(
-                                    id = "u${messages.size}",
-                                    fromUser = true,
-                                    fragments = listOf(ChatFragment.TextFragment(text)),
-                                )
-                            )
-                            if (sessionTitle == NEW_SESSION) sessionTitle = text.take(12)
-                            messages.add(
-                                ChatMessage(
-                                    id = "a${messages.size}",
-                                    fromUser = false,
-                                    streaming = true,
-                                    fragments = listOf(
-                                        ChatFragment.ReasoningFragment("正在分析请求…"),
-                                        ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Running),
-                                    ),
-                                )
-                            )
-                            scope.launch {
-                                delay(800)
-                                val i = messages.lastIndex
-                                if (i >= 0 && !messages[i].fromUser) {
-                                    messages[i] = messages[i].copy(
-                                        streaming = false,
-                                        fragments = listOf(
-                                            ChatFragment.ReasoningFragment("正在分析请求…"),
-                                            ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Ok),
-                                            ChatFragment.TextFragment("收到：$text"),
-                                        ),
-                                    )
-                                }
-                            }
-                        },
+                        onSend = { text -> controller.send(text) },
                     )
                 }
             }
