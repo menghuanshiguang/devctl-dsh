@@ -54,6 +54,15 @@ class DshController(private val appContext: Context) {
     /** 取第一台已保存的设备；没有就返回 null（UI 会提示去配） */
     fun firstDevice(): Store.Dev? = store.devices("android").firstOrNull()
 
+    /** 保存设备并立即连接（对应老客户端的「添加/编辑设备」） */
+    fun saveAndConnect(dev: Store.Dev) {
+        runCatching {
+            store.putDevice("android", dev)
+            store.setDef("android", dev.name)
+        }
+        connect(dev)
+    }
+
     // ---------------------------------------------------------------- 连接
 
     fun connect(dev: Store.Dev) {

@@ -57,6 +57,7 @@ import com.minis.dshconsole.ui.components.DsRow
 import com.minis.dshconsole.ui.components.DsRowDivider
 import com.minis.dshconsole.ui.components.DsTopBar
 import com.minis.dshconsole.ui.sessions.SessionListScreen
+import com.minis.dshconsole.ui.settings.DeviceSetupScreen
 import com.minis.dshconsole.ui.settings.SettingsScreen
 import com.minis.dshconsole.ui.theme.DsSpacing
 import com.minis.dshconsole.ui.theme.DsType
@@ -80,7 +81,7 @@ class MainActivity : ComponentActivity() {
 
 private const val NEW_SESSION = "新的会话"
 
-private enum class Screen { Chat, Sessions, Settings }
+private enum class Screen { Chat, Sessions, Settings, Setup }
 
 @Composable
 private fun Root() {
@@ -96,9 +97,16 @@ private fun Root() {
     val controller = remember { DshController(ctx.applicationContext) }
     val messages = controller.messages
 
-    // 进来就尝试连上已保存的第一台设备
+    // 进来就尝试连上已保存的第一台设备；没配过就直接进配置页
+    var needSetup by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        controller.firstDevice()?.let { controller.connect(it) }
+        val dev = controller.firstDevice()
+        if (dev == null) {
+            needSetup = true
+            screen = Screen.Setup
+        } else {
+            controller.connect(dev)
+        }
     }
 
     val sessionTitles = controller.sessionTitles
@@ -156,7 +164,23 @@ private fun Root() {
                 .navigationBarsPadding(),
         ) { s ->
             when (s) {
-                Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Chat })
+                Screen.Setup -> DeviceSetupScreen(
+                    initial = controller.firstDevice(),
+                    status = controller.status,
+                    connected = controller.connected,
+                    onBack = if (needSetup) null else ({ screen = Screen.Chat }),
+                    onSaveAndConnect = { dev ->
+                        needSetup = false
+                        controller.saveAndConnect(dev)
+                        screen = Screen.Chat
+                    },
+                )
+
+                Screen.Settings -> SettingsScreen(
+                    onBack = { screen = Screen.Chat },
+                    onOpenDeviceSetup = { screen = Screen.Setup },
+                    connectionStatus = controller.status,
+                )
 
                 Screen.Sessions -> SessionListScreen(
                     groups = sessionGroups,

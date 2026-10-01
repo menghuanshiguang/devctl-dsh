@@ -43,6 +43,8 @@ import com.minis.dshconsole.ui.theme.DshTheme
 fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDeviceSetup: () -> Unit = {},
+    connectionStatus: String = "",
 ) {
     Column(
         modifier
@@ -69,6 +71,17 @@ fun SettingsScreen(
             Spacer(Modifier.height(6.dp))
 
             // ---------------- 账户
+            DsSectionLabel("连接")
+            DsGroupCard {
+                DsRow(
+                    "连接设备",
+                    subtitle = connectionStatus.ifEmpty { "配置 DSH 的 IP 与端口" },
+                    icon = Icons.Filled.Person,
+                    onClick = onOpenDeviceSetup,
+                )
+            }
+            Spacer(Modifier.height(DsSpacing.cardGap))
+
             DsSectionLabel("账户")
             DsGroupCard {
                 DsRow("账号管理", icon = Icons.Filled.Person)
