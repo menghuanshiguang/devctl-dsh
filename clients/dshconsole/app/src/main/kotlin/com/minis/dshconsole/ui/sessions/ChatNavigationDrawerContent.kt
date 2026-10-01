@@ -1,5 +1,7 @@
 package com.minis.dshconsole.ui.sessions
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -180,7 +182,15 @@ fun SessionGroupHeader(
     }
 }
 
-/** 对应 ChatSessionItem.kt —— L2 会话条目（含选中态） */
+/**
+ * 对应 ChatSessionItem.kt —— L2 会话条目（含选中态）
+ *
+ * 对照真机 1000052262 量得：
+ *   行高 56dp（固定），选中胶囊【居中内缩】在行内 —— 高约 39dp（上下各留约 8.5dp）
+ *   胶囊左内边距 12dp（= 屏幕边距 DsSpacing.screenH - 6dp）
+ *   胶囊为全圆（radius = 高/2）
+ * 我原来把胶囊直接撑满整行（52dp 高）并贴左右边，所以看着比原版"胖"。
+ */
 @Composable
 fun ChatSessionItem(
     title: String,
@@ -190,47 +200,58 @@ fun ChatSessionItem(
     onMore: () -> Unit = {},
 ) {
     val p = DshTheme.p
-    // 截图实测：选中项 = 淡蓝胶囊底 + 品牌蓝文字 + 右侧 ··· 按钮
-    val bg = if (selected) p.brandSoft else androidx.compose.ui.graphics.Color.Transparent
+    val bg = if (selected) p.brandSoft else Color.Transparent
     val fg = if (selected) p.brand else p.textPrimary
-    Row(
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = DsSpacing.s3)
-            .clip(RoundedCornerShape(DsRadius.pill))
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(
-                start = DsSpacing.screenH - DsSpacing.s3,
-                end = DsSpacing.s1,
-                top = 15.dp,
-                bottom = 15.dp,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            title,
-            style = DsType.sessionTitle,
-            color = fg,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (selected) {
-            Box(
-                Modifier
-                    .size(DsSpacing.touch)
-                    .clip(CircleShape)
-                    .clickable(onClick = onMore),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.MoreHoriz,
-                    "更多",
-                    tint = p.brand,
-                    modifier = Modifier.size(22.dp),
-                )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(RadiiPill))
+                .background(bg)
+                .clickable(onClick = onClick)
+                .padding(start = 6.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                style = DsType.sessionTitle,
+                color = fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (selected) {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onMore),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.MoreHoriz,
+                        "更多",
+                        tint = p.brand,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }
 }
+
+/** 胶囊圆角 = 高/2（39dp 高 → 19.5dp，取整 20dp，看着就是全圆） */
+private val RadiiPill = 20.dp
+
+/**
+ * 分组头 —— 对应 SessionGroupHeader.kt（L1）
+ * 13sp 次级灰，左侧与条目文字对齐，首个分组右侧带排序图标
+ */
+@Composable
