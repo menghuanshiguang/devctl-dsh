@@ -252,43 +252,41 @@ class DshController(private val appContext: Context) {
         watching.set(true)
         dbg("watch → $sessionId")
 
-        thread(name = "dsh-tail") {
-            // ① 先拉历史（这才是消息的来源；老客户端同样用 sessions.tail）
+        // ★ 串行：必须先 tail 完再去 pump ★
+        // 同一个 socket 上两个线程同时 readLine 会互相抢帧 ——
+        // tail 的响应被 pump 吃掉、pump 的 await 被 tail 吃掉，两边一起卡住。
+        watchThread = thread(name = "dsh-watch") {
+            // ① 历史（拉完才继续）
             runCatching {
                 val r = d.request(
                     "sessions.tail",
                     JSONObject().put("sessionId", sessionId),
                     25000, null,
                 )
-                dbg("tail ← ${trim(r.toString())}")
+                dbg("tail ← " + trim(r.toString()))
                 val arr = pickArray(r, "records", "messages", "items", "events")
                 messages.clear()
-                for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.let { applyRecord(it) }
-                }
-                dbg("tail 解析出 ${arr.length()} 条记录 / 消息数 ${messages.size}")
+                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { applyRecord(it) }
+                dbg("tail 解析 ${arr.length()} 条 / 消息数 ${messages.size}")
             }.onFailure { dbg("tail 失败：${it.message}") }
-        }
 
-        runCatching {
-            // ② 订阅（只 begin，不用 await —— await(id, 0) 会立刻返回 null！）
-            val reqId = d.begin("sessions.watch", JSONObject().put("sessionId", sessionId))
-            dbg("watch begin id=$reqId")
+            if (!watching.get()) return@thread
 
-            // ③ 独立线程跑事件泵，idleMs 给足（老客户端用 3600000）
-            watchThread = thread(name = "dsh-watch") {
-                runCatching {
-                    d.pump(
-                        Dsh.EvtSink { evt, data -> onEvt(evt, data) },
-                        3_600_000,
-                        Dsh.Stop { !watching.get() },
-                    )
-                }.onFailure { dbg("pump 结束：${it.message}") }
-            }
-        }.onFailure {
-            watching.set(false)
-            status = "订阅失败：${it.message}"
-            dbg("watch begin 失败：${it.message}")
+            // ② 订阅
+            runCatching { d.begin("sessions.watch", JSONObject().put("sessionId", sessionId)) }
+                .onSuccess { dbg("watch begin id=$it") }
+                .onFailure { dbg("watch begin 失败：${it.message}") }
+
+            if (!watching.get()) return@thread
+
+            // ③ 事件泵（独占 socket 的读）
+            runCatching {
+                d.pump(
+                    Dsh.EvtSink { evt, data -> onEvt(evt, data) },
+                    3_600_000,
+                    Dsh.Stop { !watching.get() },
+                )
+            }.onFailure { dbg("pump 结束：${it.message}") }
         }
     }
 

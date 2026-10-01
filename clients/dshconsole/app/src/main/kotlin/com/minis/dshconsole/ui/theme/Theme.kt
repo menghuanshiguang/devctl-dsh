@@ -8,6 +8,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -129,10 +130,15 @@ fun DshTheme(
         }
     }
 
+    // ★ 必须 remember：Density 每次 new 都会让 CompositionLocalProvider 认为值变了，
+    //    整棵子树每帧重组 → 无限重组 → 界面卡死。
+    val scopedDensity = remember(fontScale, sysDensity.density) {
+        Density(sysDensity.density, fontScale)
+    }
     CompositionLocalProvider(
         LocalPalette provides palette,
         // 字体大小设置：改 fontScale 会让所有 sp 同步缩放
-        LocalDensity provides Density(sysDensity.density, fontScale),
+        LocalDensity provides scopedDensity,
     ) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
