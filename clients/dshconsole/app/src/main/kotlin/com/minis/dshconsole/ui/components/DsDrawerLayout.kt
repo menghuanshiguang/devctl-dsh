@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -42,7 +43,8 @@ import kotlin.math.roundToInt
  *      并在**左侧两角**加上大圆角（topStart / bottomStart），
  *      看起来像一张卡片被推开；
  *   ③ 抽屉宽度约为屏宽的 62%（截图量得右边缘在 x≈745/1216）；
- *   ④ 动画结束时蒙层消失 —— 抽屉本身**不变暗**，主内容也不变暗。
+ *   ④ **没有蒙层** —— 录屏逐帧看，抽屉自始至终是清晰白底，不压暗；
+*      主内容左边缘有一道细投影作为接缝。
  *
  * 实现：三层 —— 抽屉（底层）/ 蒙层 / 主内容（上层，位移 + 圆角）。
  * 进度用 Animatable 驱动，支持从左边缘拖拽。
@@ -51,7 +53,10 @@ import kotlin.math.roundToInt
 /** 抽屉宽度占屏宽的比例（截图实测 ≈62%） */
 private const val DrawerWidthFraction = 0.62f
 
-/** 主内容被推开时的左圆角（截图看约 28dp） */
+/** 主内容左边缘的投影（录屏里抽屉与内容之间有一道细接缝） */
+private val ContentShadow = 8.dp
+
+/** 主内容被推开时的左圆角（录屏实测约 28dp） */
 private val ContentCorner = 28.dp
 
 /** 抽屉落定所用的弹簧 */
@@ -88,23 +93,17 @@ fun DsDrawerLayout(
             drawerContent()
         }
 
-        // ---------------- 中层：蒙层（抽屉被遮住时压暗一点，动画结束即消失）
-        val scrimAlpha = (1f - progress.value) * 0.25f
-        if (scrimAlpha > 0.001f) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .alpha(scrimAlpha)
-                    .background(Color.Black)
-            )
-        }
-
         // ---------------- 上层：主内容（右移 + 左圆角 + 可拖拽）
         val corner = ContentCorner * progress.value
         Box(
             Modifier
                 .fillMaxSize()
                 .offsetX { (drawerPx * progress.value).roundToInt() }
+                .shadow(
+                    elevation = ContentShadow * progress.value,
+                    shape = RoundedCornerShape(topStart = corner, bottomStart = corner),
+                    clip = false,
+                )
                 .clip(
                     RoundedCornerShape(
                         topStart = corner,
