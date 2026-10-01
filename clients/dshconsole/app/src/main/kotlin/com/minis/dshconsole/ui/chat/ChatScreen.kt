@@ -12,6 +12,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.res.painterResource
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.ui.unit.sp
+import com.minis.dshconsole.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -50,6 +61,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -192,23 +205,33 @@ private fun MessageList(messages: List<ChatMessage>, modifier: Modifier = Modifi
         }
     } ?: 0
 
-    // 用户往上翻了就别拽他回去（对应 OpenMinis 的 StreamFollowDeadband）
-    val atBottom by remember {
-        derivedStateOf {
+    // ★ 是否跟随底部：连续跟踪「用户是不是在底部」，而不是看内容增长后的瞬间状态 ★
+    var follow by remember { mutableStateOf(true) }
+    LaunchedEffect(state) {
+        snapshotFlow {
             val info = state.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()
-            last == null || last.index >= info.totalItemsCount - 2
-        }
+            last == null || last.index >= info.totalItemsCount - 1
+        }.collect { follow = it }
     }
 
-    // ★ 下标必须以 messages 为准，不能用 state.layoutInfo.totalItemsCount ★
-    // totalItemsCount 是上一帧的旧值：tail 里先 clear() 再逐条 add，
-    // 列表缩小的瞬间 scrollToItem(旧下标) 会踩空 →
-    //   SnapshotStateList.get -> IndexOutOfBoundsException（崩溃栈就是这个）
+    // ★ 流式到底 ★
+    // 之前两个错：
+    //   ① key 用了 messages.size / fragments.size —— delta 只改文本长度，key 不变，effect 不重跑
+    //      （已改成盯 lastLen）
+    //   ② 用了 state.layoutInfo.totalItemsCount 算下标 —— 那是上一帧的旧值，会越界崩
+    //      （已改成 messages.lastIndex，并 runCatching 兜底）
+    //   ③ 现在这个：scrollToItem(idx) 会把【该项顶部】对齐到视口顶部，
+    //      消息一长，"新内容"还在屏幕外 —— 看着就是"没到底"。
+    //      正确做法：先定位到最后一项，再 scrollBy 一个极大值（会被 clamp 到内容底部）。
     LaunchedEffect(messages.size, lastLen) {
-        val last = messages.lastIndex
-        if (last >= 0 && (atBottom || messages.size != previousSize)) {
-            runCatching { state.scrollToItem(last) }
+        val idx = messages.lastIndex
+        if (idx >= 0 && (follow || messages.size != previousSize)) {
+            runCatching {
+                withFrameNanos { }          // 等这一帧排好版再滚
+                state.scrollToItem(idx)
+                state.scrollBy(1_000_000f)  // clamp 到底部
+            }
         }
         previousSize = messages.size
     }
@@ -255,48 +278,204 @@ private fun UserCell(msg: ChatMessage) {
 
 @Composable
 private fun AssistantCell(msg: ChatMessage) {
-    Column(Modifier.fillMaxWidth()) {
-        val thinking = msg.fragments.filterIsInstance<ChatFragment.ReasoningFragment>()
-        val tools = msg.fragments.filterIsInstance<ChatFragment.ToolFragment>()
+    // ★ 按到达顺序交错渲染 ★
+    // 来自 OpenMinis ChatAssistantMessageUI.kt AssistantMessageView 的原话：
+    //   "Render blocks in original order — text, thinking, and tool calls
+    //    interleaved exactly as they arrived in the stream (each assistant turn
+    //    may contain multiple text ↔ tool_use transitions, which must be
+    //    preserved for coherent reading)."
+    // 我原来把片段重排成「思考全在前、工具中间、正文最后」—— 顺序一丢就乱。
+    // 这里直接遍历 fragments，谁先到谁先画。
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        AssistantHeader()
 
-        // ---- 思考块（独立容器，流式自动展开、收尾自动收起）----
-        thinking.forEachIndexed { idx, f ->
-            ThinkingBlock(
-                key = msg.id + "#" + idx,
-                content = f.text,
-                isStreaming = msg.streaming && idx == thinking.lastIndex,
-            )
-            Spacer(Modifier.height(6.dp))
-        }
-
-        // ---- 工具行（每行一个 36dp 胶囊）----
-        tools.forEach { t ->
-            ToolCallPill(
-                name = t.name,
-                summary = t.summary,
-                state = t.state,
-                running = msg.streaming && t.state == ToolState.Running,
-            )
-            Spacer(Modifier.height(6.dp))
-        }
-
-        val body = msg.fragments.filterIsInstance<ChatFragment.TextFragment>().joinToString("") { it.text }
-        if (body.isNotEmpty()) {
-            MarkdownBody(body)
-            if (!msg.streaming) {
-                Spacer(Modifier.height(DsSpacing.s1))
-                AssistantChatMessageFooter()
+        // 最后一个块才可能是「还在流」的（前面的块到达新块时就冻结了）
+        val lastIdx = msg.fragments.lastIndex
+        msg.fragments.forEachIndexed { idx, f ->
+            when (f) {
+                is ChatFragment.ReasoningFragment -> ThinkingBlock(
+                    key = msg.id + "#r" + idx,
+                    content = f.text,
+                    isStreaming = msg.streaming && idx == lastIdx,
+                )
+                is ChatFragment.ToolFragment -> ToolCallPill(
+                    name = f.name,
+                    summary = f.summary,
+                    state = f.state,
+                    running = msg.streaming && f.state == ToolState.Running && idx == lastIdx,
+                )
+                is ChatFragment.TextFragment -> {
+                    if (f.text.isNotEmpty()) {
+                        MarkdownBody(f.text)
+                    }
+                }
             }
+            if (idx != lastIdx) Spacer(Modifier.height(6.dp))
+        }
+
+        // 流式但还没吐出任何内容 —— 打字指示器
+        if (msg.streaming && msg.fragments.none {
+                (it is ChatFragment.TextFragment && it.text.isNotEmpty()) ||
+                    it is ChatFragment.ReasoningFragment || it is ChatFragment.ToolFragment
+            }
+        ) {
+            TypingIndicator()
+        }
+
+        if (!msg.streaming && msg.fragments.isNotEmpty()) {
+            Spacer(Modifier.height(DsSpacing.s1))
+            AssistantChatMessageFooter()
+        }
+    }
+}
+
+/** 对应 OpenMinis AssistantHeader —— 18dp 图标 + 名字，padding top 10 / bottom 2 */
+@Composable
+private fun AssistantHeader() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            Image(
+                painter = painterResource(R.drawable.chat_welcome_logo),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(6.dp))
+        Text("DeepSeek", style = DsType.rowSubtitle, color = DshTheme.p.textSecondary)
+    }
+}
+
+/** 对应 OpenMinis TypingIndicator —— 三点呼吸 */
+@Composable
+private fun TypingIndicator() {
+    val transition = rememberInfiniteTransition(label = "typing")
+    val p0 by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "d0")
+    Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf(0f, 0.22f, 0.44f).forEach { delay ->
+            val a = ((p0 - delay) % 1f).coerceIn(0f, 1f)
+            Box(
+                Modifier
+                    .padding(horizontal = 2.dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(DshTheme.p.textSecondary.copy(alpha = 0.25f + 0.6f * a))
+            )
         }
     }
 }
 
 /**
- * 思考块 —— 参考 OpenMinis 的 ChatAssistantMessageUI.kt ThinkingBlock：
- *   · 独立容器：#007AFF 6% 底 + 15% 描边 + 12dp 圆角，内边距 12/8
- *   · header：图标 + 「思考」+ 字符数 + chevron，只有 header 可点
- *   · 流式开始自动展开；流结束自动收起（用户手动收起过则不打扰）
- *   · 超长保护：只渲染尾部窗口，避免 Compose 每次测量整段
+ * 工具调用胶囊 —— 对应 OpenMinis ToolCallPill 的度量：
+ *   · 容器 CircleShape（全圆胶囊）
+ *   · 图标 14dp + 8dp
+ *   · 标题 13sp Medium，工具名/摘要
+ *   · 运行中显示动画点；有耗时时右侧 11sp 等宽
+ */
+@Composable
+private fun ToolCallPill(
+    name: String,
+    summary: String,
+    state: ToolState,
+    running: Boolean,
+) {
+    val accent = toolAccent(name)
+    val failed = state == ToolState.Error
+    val fg = when {
+        failed -> DshTheme.p.danger
+        running -> accent
+        else -> DshTheme.p.textPrimary
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 32.dp)
+            .clip(CircleShape)
+            .background(accent.copy(alpha = 0.09f))
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            toolIcon(name),
+            null,
+            tint = if (failed) DshTheme.p.danger else accent,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            name,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.weight(1f)) {
+            Text(
+                summary,
+                fontSize = 13.sp,
+                color = DshTheme.p.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (running) {
+            Spacer(Modifier.width(8.dp))
+            StreamingDots()
+        }
+    }
+}
+
+/** 运行中的三点动画（对应 OpenMinis StreamingDotsText） */
+@Composable
+private fun StreamingDots() {
+    val t = rememberInfiniteTransition(label = "dots")
+    val v by t.animateFloat(0f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "v")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { i ->
+            val a = ((v + i * 0.28f) % 1f)
+            Box(
+                Modifier
+                    .padding(horizontal = 1.dp)
+                    .size(4.dp)
+                    .clip(CircleShape)
+                    .background(DshTheme.p.textSecondary.copy(alpha = 0.3f + 0.7f * a))
+            )
+        }
+    }
+}
+
+/** 工具图标（按名字猜一个合适的） */
+private fun toolIcon(name: String): ImageVector = when {
+    name.contains("read", true) -> Icons.Filled.Description
+    name.contains("write", true) || name.contains("edit", true) -> Icons.Filled.Edit
+    name.contains("bash", true) || name.contains("exec", true) || name.contains("shell", true) -> Icons.Filled.Terminal
+    name.contains("search", true) || name.contains("grep", true) -> Icons.Filled.Search
+    name.contains("web", true) -> Icons.Filled.Language
+    else -> Icons.Filled.Build
+}
+
+/** 每种工具一个强调色（对应 OpenMinis 的 toolAccentColor） */
+private fun toolAccent(name: String): Color = when {
+    name.contains("read", true) -> Color(0xFF34C759)
+    name.contains("write", true) || name.contains("edit", true) -> Color(0xFFFF9F0A)
+    name.contains("bash", true) || name.contains("exec", true) || name.contains("shell", true) ->
+        Color(0xFFAF52DE)
+    name.contains("search", true) || name.contains("grep", true) -> Color(0xFF007AFF)
+    name.contains("web", true) -> Color(0xFF00C7BE)
+    else -> Color(0xFF8E8E93)
+}
+
+/**
+ * 思考块 —— 对应 OpenMinis ThinkingBlock：
+ *   #007AFF 6% 底 + 15% 描边 + 12dp 圆角，内边距 12/8
+ *   header = 图标 + 「思考」+ 字符数 + chevron，只有 header 可点
+ *   流式自动展开、收尾自动收起；用户手动收起过则不再打扰
  */
 @Composable
 private fun ThinkingBlock(
@@ -332,25 +511,16 @@ private fun ThinkingBlock(
                 .fillMaxWidth()
                 .clickable {
                     expanded = !expanded
-                    if (!expanded) userCollapsed = true else userCollapsed = false
+                    userCollapsed = !expanded
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Filled.Psychology,
-                null,
-                tint = thinkingBlue,
-                modifier = Modifier.size(16.dp),
-            )
+            Icon(Icons.Filled.Psychology, null, tint = thinkingBlue, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("思考", style = DsType.trace, color = thinkingBlue)
+            Text("思考", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = thinkingBlue)
             Spacer(Modifier.width(8.dp))
-            Text(charLabel, style = DsType.trace, color = thinkingBlue.copy(alpha = 0.6f))
+            Text(charLabel, fontSize = 11.sp, color = thinkingBlue.copy(alpha = 0.6f))
             Spacer(Modifier.weight(1f))
-            if (isStreaming) {
-                Box(Modifier.size(6.dp).clip(CircleShape).background(thinkingBlue))
-                Spacer(Modifier.width(8.dp))
-            }
             Icon(
                 if (expanded) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 if (expanded) "收起" else "展开",
@@ -359,83 +529,13 @@ private fun ThinkingBlock(
             )
         }
         AnimatedVisibility(visible = expanded) {
-            val shown = remember(charCount) {
-                if (charCount > 3000) content.takeLast(3000) else content
-            }
+            val shown = remember(charCount) { if (charCount > 3000) content.takeLast(3000) else content }
             Text(
                 shown,
                 style = DsType.trace,
                 color = DshTheme.p.textSecondary,
                 modifier = Modifier.padding(top = 6.dp),
             )
-        }
-    }
-}
-
-/** 状态色：每种工具给一个强调色（对应 OpenMinis 的 toolAccentColor） */
-private fun toolAccent(name: String): Color = when {
-    name.contains("read", true) -> Color(0xFF34C759)
-    name.contains("write", true) || name.contains("edit", true) -> Color(0xFFFF9F0A)
-    name.contains("bash", true) || name.contains("exec", true) || name.contains("shell", true) ->
-        Color(0xFFAF52DE)
-    name.contains("search", true) || name.contains("grep", true) -> Color(0xFF007AFF)
-    name.contains("web", true) -> Color(0xFF00C7BE)
-    else -> Color(0xFF8E8E93)
-}
-
-/**
- * 工具调用胶囊 —— 参考 OpenMinis 的 ToolCallPill：
- * 单行、36dp 高、左侧状态点 + 工具名 + 摘要，运行中整行扫光。
- */
-@Composable
-private fun ToolCallPill(
-    name: String,
-    summary: String,
-    state: ToolState,
-    running: Boolean,
-) {
-    val accent = toolAccent(name)
-    val failed = state == ToolState.Error
-    val lineColor by animateColorAsState(
-        when {
-            failed -> DshTheme.p.danger
-            running -> accent
-            else -> DshTheme.p.textSecondary
-        },
-        label = "toolLine",
-    )
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(accent.copy(alpha = 0.08f))
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(if (failed) DshTheme.p.danger else accent)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            name,
-            style = DsType.trace,
-            color = if (failed) DshTheme.p.danger else accent,
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(10.dp))
-        Box(Modifier.weight(1f)) {
-            Text(
-                summary,
-                style = DsType.trace,
-                color = lineColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (running) ShimmerOverlay()
         }
     }
 }
