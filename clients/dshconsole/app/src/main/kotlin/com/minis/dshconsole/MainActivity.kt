@@ -6,6 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -121,7 +126,20 @@ private fun Root() {
     ) {
         AnimatedContent(
             targetState = screen,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            // 对应原包 ui/components/menu/ParallaxContent.kt:126 ParallaxAnimatedContent
+            // 参数取自 smali zz7.smali 的常量表：spring(dampingRatio = 1.0f, stiffness = 1400f)
+            // 行为：新页面从右滑入整屏，旧页面只左移 1/4 屏 —— 这就是「视差」
+            transitionSpec = {
+                val forward = targetState.ordinal > initialState.ordinal
+                val spec = spring<IntOffset>(dampingRatio = 1.0f, stiffness = 1400f)
+                val enter = slideInHorizontally(spec) { w -> if (forward) w else -w / 4 } + fadeIn(
+                    animationSpec = tween(180)
+                )
+                val exit = slideOutHorizontally(spec) { w -> if (forward) -w / 4 else w } + fadeOut(
+                    animationSpec = tween(120)
+                )
+                enter togetherWith exit
+            },
             label = "screen",
             modifier = Modifier
                 .fillMaxSize()

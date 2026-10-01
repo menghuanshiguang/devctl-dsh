@@ -65,7 +65,7 @@ private val ContentShadow = 8.dp
 private val ContentCorner = 28.dp
 
 /** 抽屉落定所用的弹簧 */
-private val OpenSpec = spring<Float>(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
+private val OpenSpec = spring<Float>(dampingRatio = 1.0f, stiffness = 1400f)
 private val CloseSpec = tween<Float>(durationMillis = 240)
 
 @Composable
