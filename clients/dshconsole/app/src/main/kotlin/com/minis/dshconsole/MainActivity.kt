@@ -25,11 +25,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -48,6 +44,7 @@ import com.minis.dshconsole.ui.chat.ChatMessage
 import com.minis.dshconsole.ui.chat.ChatScreen
 import com.minis.dshconsole.ui.chat.ToolState
 import com.minis.dshconsole.ui.components.DsCircleButton
+import com.minis.dshconsole.ui.components.DsDrawerLayout
 import com.minis.dshconsole.ui.components.DsRow
 import com.minis.dshconsole.ui.components.DsRowDivider
 import com.minis.dshconsole.ui.components.DsTopBar
@@ -79,8 +76,9 @@ private enum class Screen { Chat, Sessions, Settings }
 
 @Composable
 private fun Root() {
-    val drawer = rememberDrawerState(DrawerValue.Closed)
+    
     val scope = rememberCoroutineScope()
+    var drawerOpen by remember { mutableStateOf(false) }
     var screen by remember { mutableStateOf(Screen.Chat) }
     var sessionTitle by remember { mutableStateOf(NEW_SESSION) }
     var deepThink by remember { mutableStateOf(false) }
@@ -98,32 +96,24 @@ private fun Root() {
 
     BackHandler(enabled = screen != Screen.Chat) { screen = Screen.Chat }
 
-    ModalNavigationDrawer(
-        drawerState = drawer,
-        // 抽屉形状：只圆「末端」两角（对应 M3 DrawerDefaults.shape / 原包常量 16dp）
+    DsDrawerLayout(
+        open = drawerOpen,
+        onOpen = { drawerOpen = true },
+        onClose = { drawerOpen = false },
         drawerContent = {
-            ModalDrawerSheet(
-                drawerShape = RoundedCornerShape(
-                    topEnd = 16.dp,
-                    bottomEnd = 16.dp,
-                ),
-                drawerContainerColor = DshTheme.p.surface,
-                modifier = Modifier.fillMaxWidth(0.82f),
-            ) {
-                ChatNavigationDrawerContent(
-                    groups = sessionGroups,
-                    accountName = "faerydewiee",
-                    onOpenSession = { t ->
-                        sessionTitle = t
-                        screen = Screen.Chat
-                        scope.launch { drawer.close() }
-                    },
-                    onOpenAccountMenu = {
-                        screen = Screen.Settings
-                        scope.launch { drawer.close() }
-                    },
-                )
-            }
+            ChatNavigationDrawerContent(
+                groups = sessionGroups,
+                accountName = "faerydewiee",
+                onOpenSession = { t ->
+                    sessionTitle = t
+                    screen = Screen.Chat
+                    drawerOpen = false
+                },
+                onOpenAccountMenu = {
+                    screen = Screen.Settings
+                    drawerOpen = false
+                },
+            )
         },
     ) {
         AnimatedContent(
@@ -155,7 +145,7 @@ private fun Root() {
                         title = if (sessionTitle == NEW_SESSION) "" else sessionTitle,
                         left = {
                             DsCircleButton(Icons.Filled.Menu, "菜单", {
-                                scope.launch { drawer.open() }
+                                drawerOpen = true
                             })
                         },
                         right = {
