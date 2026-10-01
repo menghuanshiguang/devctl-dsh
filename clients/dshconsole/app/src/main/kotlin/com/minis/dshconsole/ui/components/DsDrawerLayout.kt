@@ -14,6 +14,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,9 +79,18 @@ fun DsDrawerLayout(
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(open) {
-        if (open) progress.animateTo(1f, OpenSpec) else progress.animateTo(0f, CloseSpec)
+        if (open) {
+            // 切到侧栏时收起输入法并清焦点（否则键盘会浮在抽屉上方）
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+            progress.animateTo(1f, OpenSpec)
+        } else {
+            progress.animateTo(0f, CloseSpec)
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -136,7 +149,16 @@ fun DsDrawerLayout(
             content()
             // 打开状态下点右侧露出的部分可关闭
             if (progress.value > 0.99f) {
-                Box(Modifier.fillMaxSize().clickable(onClick = onClose))
+                // 纯点击层：无涟漪、无按压动效
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onClose,
+                        )
+                )
             }
         }
     }
