@@ -1,5 +1,12 @@
 package com.minis.dshconsole.ui.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
+import com.minis.dshconsole.ui.theme.DsMotion
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -112,15 +119,7 @@ fun ChatScreen(
         } else {
             MessageList(messages, Modifier.weight(1f))
         }
-        if (uploadOpen) {
-            UploadPanel(
-                attachedCount = 1,
-                onPickCamera = { uploadOpen = false },
-                onPickAlbum = { uploadOpen = false },
-                onPickFile = { uploadOpen = false },
-            )
-            Spacer(Modifier.height(DsSpacing.s2))
-        }
+        // 顺序与原版一致：输入卡在上、附件面板在下（截图对照修正）
         ChatInputCard(
             onSend = onSend,
             deepThink = deepThink,
@@ -129,6 +128,28 @@ fun ChatScreen(
             onToggleSearch = onToggleSearch,
             onToggleUpload = { uploadOpen = !uploadOpen },
         )
+        AnimatedVisibility(
+            visible = uploadOpen,
+            enter = expandVertically(
+                animationSpec = tween(DsMotion.normal),
+                expandFrom = Alignment.Bottom,
+            ) + fadeIn(tween(DsMotion.normal)),
+            exit = shrinkVertically(
+                animationSpec = tween(DsMotion.fast),
+                shrinkTowards = Alignment.Bottom,
+            ) + fadeOut(tween(DsMotion.fast)),
+        ) {
+            Column {
+                Spacer(Modifier.height(DsSpacing.s3))
+                UploadPanel(
+                    attachedCount = 1,
+                    onPickCamera = { uploadOpen = false },
+                    onPickAlbum = { uploadOpen = false },
+                    onPickFile = { uploadOpen = false },
+                )
+                Spacer(Modifier.height(DsSpacing.s2))
+            }
+        }
     }
 }
 

@@ -40,6 +40,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.minis.dshconsole.ui.sessions.ChatNavigationDrawerContent
 import com.minis.dshconsole.ui.chat.ChatFragment
 import com.minis.dshconsole.ui.chat.ChatMessage
 import com.minis.dshconsole.ui.chat.ChatScreen
@@ -97,13 +100,30 @@ private fun Root() {
 
     ModalNavigationDrawer(
         drawerState = drawer,
+        // 抽屉形状：只圆「末端」两角（对应 M3 DrawerDefaults.shape / 原包常量 16dp）
         drawerContent = {
-            DsDrawer(
-                onPick = { s ->
-                    screen = s
-                    scope.launch { drawer.close() }
-                }
-            )
+            ModalDrawerSheet(
+                drawerShape = RoundedCornerShape(
+                    topEnd = 16.dp,
+                    bottomEnd = 16.dp,
+                ),
+                drawerContainerColor = DshTheme.p.surface,
+                modifier = Modifier.fillMaxWidth(0.82f),
+            ) {
+                ChatNavigationDrawerContent(
+                    groups = sessionGroups,
+                    accountName = "faerydewiee",
+                    onOpenSession = { t ->
+                        sessionTitle = t
+                        screen = Screen.Chat
+                        scope.launch { drawer.close() }
+                    },
+                    onOpenAccountMenu = {
+                        screen = Screen.Settings
+                        scope.launch { drawer.close() }
+                    },
+                )
+            }
         },
     ) {
         AnimatedContent(
@@ -194,35 +214,3 @@ private fun Root() {
     }
 }
 
-/** 侧栏 —— 对应原包 ChatNavigationDrawerContent.kt */
-@Composable
-private fun DsDrawer(onPick: (Screen) -> Unit) {
-    val p = DshTheme.p
-    ModalDrawerSheet(
-        drawerContainerColor = p.surface,
-        modifier = Modifier.fillMaxWidth(0.78f).statusBarsPadding(),
-    ) {
-        Column(Modifier.fillMaxWidth()) {
-            Spacer(Modifier.height(DsSpacing.s5))
-            Text(
-                "DSHConsole",
-                style = DsType.pageTitle,
-                color = p.textPrimary,
-                modifier = Modifier.height(32.dp).fillMaxWidth()
-                    .padding(horizontal = DsSpacing.screenH),
-            )
-            Spacer(Modifier.height(DsSpacing.s2))
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = DsSpacing.screenH),
-                horizontalArrangement = Arrangement.spacedBy(DsSpacing.s2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("devctl-dsh · 远端控制", style = DsType.rowSubtitle, color = p.textSecondary)
-            }
-            Spacer(Modifier.height(DsSpacing.s3))
-            DsRow("会话", icon = Icons.Filled.Menu, onClick = { onPick(Screen.Sessions) })
-            DsRowDivider()
-            DsRow("设置", icon = Icons.Filled.MoreVert, onClick = { onPick(Screen.Settings) })
-        }
-    }
-}
