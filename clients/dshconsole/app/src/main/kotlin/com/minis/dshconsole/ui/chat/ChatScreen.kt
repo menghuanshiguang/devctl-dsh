@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.minis.dshconsole.ui.DsStr
 import com.minis.dshconsole.ui.components.DsChip
 import com.minis.dshconsole.ui.components.DsCircleButton
 import com.minis.dshconsole.ui.components.brush.ShimmerOverlay
@@ -102,11 +103,22 @@ fun ChatScreen(
     onToggleThink: () -> Unit = {},
     onToggleSearch: () -> Unit = {},
 ) {
+    var uploadOpen by remember { mutableStateOf(false) }
+
     Column(modifier.fillMaxSize().background(DshTheme.p.bg).imePadding()) {
         if (messages.isEmpty()) {
-            EmptyState(Modifier.weight(1f))
+            ChatWelcome(Modifier.weight(1f))
         } else {
             MessageList(messages, Modifier.weight(1f))
+        }
+        if (uploadOpen) {
+            UploadPanel(
+                attachedCount = 1,
+                onPickCamera = { uploadOpen = false },
+                onPickAlbum = { uploadOpen = false },
+                onPickFile = { uploadOpen = false },
+            )
+            Spacer(Modifier.height(DsSpacing.s2))
         }
         ChatInputCard(
             onSend = onSend,
@@ -114,33 +126,8 @@ fun ChatScreen(
             webSearch = webSearch,
             onToggleThink = onToggleThink,
             onToggleSearch = onToggleSearch,
+            onToggleUpload = { uploadOpen = !uploadOpen },
         )
-    }
-}
-
-// ---------------------------------------------------------------- 空态
-
-@Composable
-private fun EmptyState(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(DshTheme.p.brandSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.TravelExplore,
-                    null,
-                    tint = DshTheme.p.brand,
-                    modifier = Modifier.size(40.dp),
-                )
-            }
-            Spacer(Modifier.height(DsSpacing.s5))
-            Text("嗨！今天想聊些什么？", style = DsType.greeting, color = DshTheme.p.textPrimary)
-        }
     }
 }
 
@@ -377,6 +364,7 @@ private fun ChatInputCard(
     webSearch: Boolean,
     onToggleThink: () -> Unit,
     onToggleSearch: () -> Unit,
+    onToggleUpload: () -> Unit,
 ) {
     val p = DshTheme.p
     var draft by remember { mutableStateOf("") }
@@ -393,7 +381,7 @@ private fun ChatInputCard(
         Box(Modifier.fillMaxWidth().height(48.dp)) {
             if (draft.isEmpty()) {
                 Text(
-                    "发消息或按住说话",
+                    DsStr.chatInputPlaceholderVoice,
                     style = DsType.body,
                     color = p.textPlaceholder,
                     modifier = Modifier.align(Alignment.CenterStart),
@@ -410,14 +398,14 @@ private fun ChatInputCard(
         Spacer(Modifier.height(DsSpacing.s2))
         Row(verticalAlignment = Alignment.CenterVertically) {
             DsChip(
-                "深度思考",
+                DsStr.messageR1Button,
                 icon = Icons.Filled.Psychology,
                 selected = deepThink,
                 onClick = onToggleThink,
             )
             Spacer(Modifier.width(DsSpacing.s2))
             DsChip(
-                "智能搜索",
+                DsStr.messageSearchButton,
                 icon = Icons.Filled.TravelExplore,
                 selected = webSearch,
                 onClick = onToggleSearch,
@@ -430,9 +418,9 @@ private fun ChatInputCard(
                     container = p.brand, tint = p.onBrand,
                 )
             } else {
-                DsCircleButton(Icons.Filled.Add, "更多", {})
+                DsCircleButton(Icons.Filled.Add, "更多", onToggleUpload)
                 Spacer(Modifier.width(DsSpacing.s1))
-                DsCircleButton(Icons.Filled.GraphicEq, "语音", {})
+                DsCircleButton(Icons.Filled.GraphicEq, DsStr.voiceInputButton, {})
             }
         }
     }
