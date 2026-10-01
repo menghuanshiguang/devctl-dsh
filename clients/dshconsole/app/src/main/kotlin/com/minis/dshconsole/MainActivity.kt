@@ -2,9 +2,15 @@ package com.minis.dshconsole
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,15 +18,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
@@ -34,179 +38,187 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.minis.dshconsole.ui.chat.ChatFragment
 import com.minis.dshconsole.ui.chat.ChatMessage
 import com.minis.dshconsole.ui.chat.ChatScreen
 import com.minis.dshconsole.ui.chat.ToolState
-import com.minis.dshconsole.ui.components.AppIconButton
-import com.minis.dshconsole.ui.components.SettingItem
-import com.minis.dshconsole.ui.theme.AppTypography
+import com.minis.dshconsole.ui.components.DsCircleButton
+import com.minis.dshconsole.ui.components.DsRow
+import com.minis.dshconsole.ui.components.DsRowDivider
+import com.minis.dshconsole.ui.components.DsTopBar
+import com.minis.dshconsole.ui.sessions.SessionListScreen
+import com.minis.dshconsole.ui.settings.SettingsScreen
+import com.minis.dshconsole.ui.theme.DsSpacing
+import com.minis.dshconsole.ui.theme.DsType
 import com.minis.dshconsole.ui.theme.DshTheme
-import com.minis.dshconsole.ui.theme.Spacing
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
  * DSHConsole v2 —— UI 用 DeepSeek 客户端同款实现方式重做。
  *
- * 对应原包 com.deepseek.chat.MainActivity：Compose 单 Activity + 抽屉导航，
- * 界面全部由 DeepSeekTheme(DshTheme) 提供的设计令牌驱动。
+ * 对应原包 com.deepseek.chat.MainActivity：Compose 单 Activity + 抽屉导航。
+ * 三个页面（聊天 / 会话列表 / 设置）的配色与尺寸均按真机截图实测还原。
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { DshTheme { DshConsoleRoot() } }
+        setContent { DshTheme { Root() } }
     }
 }
 
-private const val WELCOME_BODY = """DSH 客户端 UI 已切换到 **DeepSeek 同款实现方式**（Jetpack Compose）。
-
-```kotlin
-DshTheme {
-    ChatScreen(messages = messages, onSend = { ... })
-}
-```
-
-发一条消息试试流式渲染、思考行与工具行的效果。"""
+private enum class Screen { Chat, Sessions, Settings }
 
 @Composable
-private fun DshConsoleRoot() {
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+private fun Root() {
+    val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var screen by remember { mutableStateOf(Screen.Chat) }
+    var sessionTitle by remember { mutableStateOf("新的会话") }
+    var deepThink by remember { mutableStateOf(false) }
+    var webSearch by remember { mutableStateOf(false) }
 
-    // 首屏在 remember 里种一条欢迎消息（避免在组合期写 SnapshotStateList）
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessage(
-                id = "welcome",
-                fromUser = false,
-                fragments = listOf(ChatFragment.TextFragment(WELCOME_BODY)),
-            )
+    val messages = remember { mutableStateListOf<ChatMessage>() }
+
+    val sessionGroups = remember {
+        listOf(
+            "7 天内" to listOf("工具调用配对报错", "ProcessGovernor补丁验证"),
+            "30 天内" to listOf("雷霆战机游戏代码", "你好", "申请理由范文", "LSA阻止加载DLL"),
+            "2026年8月" to listOf("海阔天空1992原稿", "打招呼问候"),
         )
     }
-    var sessionTitle by remember { mutableStateOf("新的会话") }
+
+    BackHandler(enabled = screen != Screen.Chat) { screen = Screen.Chat }
 
     ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = { DshDrawer() },
+        drawerState = drawer,
+        drawerContent = {
+            DsDrawer(
+                onPick = { s ->
+                    screen = s
+                    scope.launch { drawer.close() }
+                }
+            )
+        },
     ) {
-        Column(
-            Modifier
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "screen",
+            modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
+                .background(DshTheme.p.bg)
                 .statusBarsPadding()
-                .navigationBarsPadding()
-        ) {
-            DshTopBar(
-                title = sessionTitle,
-                onMenu = { scope.launch { drawerState.open() } },
-            )
-            ChatScreen(
-                title = sessionTitle,
-                subtitle = null,
-                messages = messages,
-                onSend = { text ->
-                    messages.add(
-                        ChatMessage(
-                            id = "u${messages.size}",
-                            fromUser = true,
-                            fragments = listOf(ChatFragment.TextFragment(text)),
-                        )
+                .navigationBarsPadding(),
+        ) { s ->
+            when (s) {
+                Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Chat })
+
+                Screen.Sessions -> SessionListScreen(
+                    groups = sessionGroups,
+                    accountName = "faerydewiee",
+                    onOpenSession = { t ->
+                        sessionTitle = t
+                        screen = Screen.Chat
+                    },
+                    onOpenSettings = { screen = Screen.Settings },
+                )
+
+                Screen.Chat -> Column(Modifier.fillMaxSize()) {
+                    DsTopBar(
+                        title = sessionTitle,
+                        left = {
+                            DsCircleButton(Icons.Filled.Menu, "菜单", {
+                                scope.launch { drawer.open() }
+                            })
+                        },
+                        right = {
+                            DsCircleButton(Icons.Filled.GraphicEq, "朗读", {})
+                            DsCircleButton(Icons.Filled.Add, "新会话", {
+                                messages.clear()
+                                sessionTitle = "新的会话"
+                            })
+                        },
                     )
-                    if (sessionTitle == "新的会话") {
-                        sessionTitle = text.take(12)
-                    }
-                    messages.add(
-                        ChatMessage(
-                            id = "a${messages.size}",
-                            fromUser = false,
-                            streaming = true,
-                            fragments = listOf(
-                                ChatFragment.ReasoningFragment("正在分析请求…"),
-                                ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Running),
-                            ),
-                        )
-                    )
-                    scope.launch {
-                        delay(700)
-                        val idx = messages.lastIndex
-                        if (idx >= 0 && !messages[idx].fromUser) {
-                            val old = messages[idx]
-                            messages[idx] = old.copy(
-                                streaming = false,
-                                fragments = listOf(
-                                    ChatFragment.ReasoningFragment("正在分析请求…"),
-                                    ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Ok),
-                                    ChatFragment.TextFragment("收到：$text"),
-                                ),
+                    ChatScreen(
+                        messages = messages,
+                        deepThink = deepThink,
+                        webSearch = webSearch,
+                        onToggleThink = { deepThink = !deepThink },
+                        onToggleSearch = { webSearch = !webSearch },
+                        onSend = { text ->
+                            messages.add(
+                                ChatMessage(
+                                    id = "u${messages.size}",
+                                    fromUser = true,
+                                    fragments = listOf(ChatFragment.TextFragment(text)),
+                                )
                             )
-                        }
-                    }
-                },
-            )
+                            if (sessionTitle == "新的会话") sessionTitle = text.take(12)
+                            messages.add(
+                                ChatMessage(
+                                    id = "a${messages.size}",
+                                    fromUser = false,
+                                    streaming = true,
+                                    fragments = listOf(
+                                        ChatFragment.ReasoningFragment("正在分析请求…"),
+                                        ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Running),
+                                    ),
+                                )
+                            )
+                            scope.launch {
+                                delay(800)
+                                val i = messages.lastIndex
+                                if (i >= 0 && !messages[i].fromUser) {
+                                    messages[i] = messages[i].copy(
+                                        streaming = false,
+                                        fragments = listOf(
+                                            ChatFragment.ReasoningFragment("正在分析请求…"),
+                                            ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Ok),
+                                            ChatFragment.TextFragment("收到：$text"),
+                                        ),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }
 
+/** 侧栏 —— 对应原包 ChatNavigationDrawerContent.kt */
 @Composable
-private fun DshTopBar(title: String, onMenu: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(scheme.surface)
-            .height(56.dp)
-            .padding(horizontal = Spacing.s2),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AppIconButton(Icons.Filled.Menu, "菜单", onMenu)
-        Text(
-            title,
-            style = AppTypography.topBarTitle,
-            color = scheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = Spacing.s2),
-        )
-        AppIconButton(Icons.Filled.Add, "新会话", {})
-        AppIconButton(Icons.Filled.MoreVert, "更多", {})
-    }
-    HorizontalDivider(color = scheme.outlineVariant.copy(alpha = 0.5f))
-}
-
-/** 对应原包 ChatNavigationDrawerContent.kt */
-@Composable
-private fun DshDrawer() {
+private fun DsDrawer(onPick: (Screen) -> Unit) {
+    val p = DshTheme.p
     ModalDrawerSheet(
-        drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        drawerContainerColor = p.surface,
+        modifier = Modifier.fillMaxWidth(0.78f).statusBarsPadding(),
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = Spacing.s6)
-        ) {
+        Column(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.height(DsSpacing.s5))
             Text(
                 "DSHConsole",
-                style = AppTypography.topBarTitle,
-                modifier = Modifier.padding(horizontal = Spacing.screenH, vertical = Spacing.s2),
+                style = DsType.pageTitle,
+                color = p.textPrimary,
+                modifier = Modifier.height(32.dp).fillMaxWidth()
+                    .padding(horizontal = DsSpacing.screenH),
             )
-            Text(
-                "devctl-dsh · 远端控制",
-                style = AppTypography.markdownBodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = Spacing.screenH),
-            )
-            Spacer(Modifier.height(Spacing.s4))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            SettingItem(title = "会话", subtitle = "浏览与切换 DSH 会话")
-            SettingItem(title = "设备", subtitle = "devctl 连接状态")
-            SettingItem(title = "设置", subtitle = "主题 · 连接 · 关于")
-            Spacer(Modifier.height(Spacing.s4))
+            Spacer(Modifier.height(DsSpacing.s2))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = DsSpacing.screenH),
+                horizontalArrangement = Arrangement.spacedBy(DsSpacing.s2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("devctl-dsh · 远端控制", style = DsType.rowSubtitle, color = p.textSecondary)
+            }
+            Spacer(Modifier.height(DsSpacing.s3))
+            DsRow("会话", icon = Icons.Filled.Menu, onClick = { onPick(Screen.Sessions) })
+            DsRowDivider()
+            DsRow("设置", icon = Icons.Filled.MoreVert, onClick = { onPick(Screen.Settings) })
         }
     }
 }

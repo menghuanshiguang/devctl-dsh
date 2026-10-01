@@ -3,132 +3,159 @@ package com.minis.dshconsole.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /*
- * DeepSeek 客户端的配色令牌
+ * DeepSeek 客户端配色令牌 —— 全部来自**实测**，不是推测
  * ============================================================================
- * 来源：从 com.deepseek.chat v2.6.1 的 smali 里完整还原（见 docs/extract_palette.py）
+ * 两个来源互相印证：
  *
- *   原始结构（R8 混淆后的真实链路）：
- *       rz7  原始色值表        Color 由 const 整数 + Ly08;->k(R,G,B,A) / m(R,G,B) 构造
- *       mx2  暗色语义调色板  ┐
- *       ix2  亮色语义调色板  ┘  引用 rz7 的字段
- *       rx2  darkColorScheme ┐  按 Material3 ColorScheme 形参顺序读上面的调色板
- *       ema  lightColorScheme┘
- *       fma  = Theme.kt       DeepSeekTheme / ForceDark / fallbackMaterialColorScheme
+ * ① 从 APK 里逐层还原（docs/extract_palette.py）
+ *      rz7 原始色值表 → mx2/ix2 语义调色板 → rx2/ema → fma(=Theme.kt)
+ *      kx2 = 运行时的语义色板（蓝种子 Material3 方案）
+ *      res/values/colors.xml        primary=#426EFE  splash=#FFFFFF
+ *      res/values-night/colors.xml  primary=#507BF2  splash=#0F0F0F
  *
- *   还原结果：rz7 的 37 个色值与 Material3 baseline（#6750A4 / #625B71 / #7D5260 /
- *   #B3261E / #FEF7FF …）逐一吻合 —— 即客户端在拿不到远端主题时回退到 M3 默认色板
- *   （Theme.kt:92 的 fallback.fallbackMaterialColorScheme）。
+ * ② 从真机截图逐像素采样（1216×2640，3x 密度）
+ *      主文字        #0F0F0F   （18227 px）
+ *      次级文字      #8F9094   （ 6958 px）
+ *      占位文字      #B9BABC   （ 4544 px）
+ *      页面底(列表)  #FFFFFF
+ *      页面底(设置)  #F8F8F8
+ *      卡片底        #FFFFFF
+ *      品牌蓝        #416EFD   ≈ 资源里的 #426EFE（JPEG 误差）
+ *      胶囊底        #ECF2FE
+ *      搜索框底      #F5F5F5
+ *      分割线        #EDEDED
  *
- * 品牌色来源（来自 APK 自己的资源，非猜测）：
- *       res/values/colors.xml        primary = #426EFE   splashscreenBackground = #FFFFFF
- *       res/values-night/colors.xml  primary = #507BF2   splashscreenBackground = #0F0F0F
+ * 结论：这是**中性白灰 + 单一品牌蓝点缀**的体系，
+ *      不是 Material3 默认的紫色 baseline（那只是拿不到远端主题时的 fallback）。
  * ============================================================================
  */
 
-// ---------------------------------------------------------------- Material3 baseline
-// 下方 37 个值就是从 rz7 原样还原出来的（命名按其在 M3 色板中的角色）
-internal object M3Baseline {
-    val white = Color(0xFFFFFFFF)
-    val black = Color(0xFF000000)
+object DsColor {
 
-    // primary 家族
-    val primary = Color(0xFF6750A4)
-    val onPrimary = Color(0xFFFFFFFF)
-    val primaryContainer = Color(0xFFEADDFF)
-    val onPrimaryContainer = Color(0xFF21005D)
-    val inversePrimary = Color(0xFFD0BCFF)
+    // ---------------------------------------------------------- 品牌
+    /** 亮色品牌蓝 —— values/colors.xml 的 R.color.primary（截图像素 #416EFD 印证） */
+    val Brand = Color(0xFF426EFE)
 
-    // secondary
-    val secondary = Color(0xFF625B71)
-    val onSecondary = Color(0xFFFFFFFF)
-    val secondaryContainer = Color(0xFFE8DEF8)
-    val onSecondaryContainer = Color(0xFF1D192B)
+    /** 暗色品牌蓝 —— values-night/colors.xml */
+    val BrandNight = Color(0xFF507BF2)
 
-    // tertiary
-    val tertiary = Color(0xFF7D5260)
-    val onTertiary = Color(0xFFFFFFFF)
-    val tertiaryContainer = Color(0xFFFFD8E4)
-    val onTertiaryContainer = Color(0xFF31111D)
+    /** 胶囊/标签的淡蓝底（截图实测 #ECF2FE） */
+    val BrandSoft = Color(0xFFECF2FE)
 
-    // error
-    val error = Color(0xFFB3261E)
-    val onError = Color(0xFFFFFFFF)
-    val errorContainer = Color(0xFFF9DEDC)
-    val onErrorContainer = Color(0xFF410E0B)
+    /** 来自 kx2 色板的深/浅蓝（Material3 蓝种子方案） */
+    val BlueDark = Color(0xFF004CA7)
+    val BlueDarkest = Color(0xFF002E6A)
+    val BlueMid = Color(0xFF2170E4)
+    val BlueSoft2 = Color(0xFFE6ECFF)
+    val BlueBright = Color(0xFF005AC2)
 
-    // surface 阶梯（自暗到亮）
-    val surfaceDim = Color(0xFFDED8E1)
-    val surfaceContainerLowest = Color(0xFFFFFFFF)
-    val surfaceContainerLow = Color(0xFFF7F2FA)
-    val surfaceContainer = Color(0xFFF3EDF7)
-    val surfaceContainerHigh = Color(0xFFECE6F0)
-    val surfaceContainerHighest = Color(0xFFE6E0E9)
-    val surfaceBright = Color(0xFFFEF7FF)
-    val surface = Color(0xFFFEF7FF)
-    val surfaceVariant = Color(0xFFE7E0EC)
-    val onSurface = Color(0xFF1D1B20)
-    val onSurfaceVariant = Color(0xFF49454F)
-    val inverseSurface = Color(0xFF322F35)
-    val inverseOnSurface = Color(0xFFF5EFF7)
+    /** 暗色下的淡蓝底（品牌蓝低透明度铺在 #0F0F0F 上的效果） */
+    val BrandBlueNightSoft = Color(0xFF1B2A4A)
 
-    val outline = Color(0xFF79747E)
-    val outlineVariant = Color(0xFFCAC4D0)
-    val scrim = Color(0xFF000000)
+    // ---------------------------------------------------------- 中性
+    /** 主文字（截图实测 #0F0F0F，占比最高） */
+    val TextPrimary = Color(0xFF0F0F0F)
 
-    // fixed 家族（M3 1.4 新增）
-    val primaryFixed = Color(0xFFEADDFF)
-    val onPrimaryFixedVariant = Color(0xFF4F378B)
-    val secondaryFixedDim = Color(0xFFCCC2DC)
-    val onSecondaryFixedVariant = Color(0xFF4A4458)
-    val tertiaryFixedDim = Color(0xFFEFB8C8)
-    val onTertiaryFixedVariant = Color(0xFF633B48)
+    /** 次级文字 / 分组标签 / 行值（截图实测 #8F9094） */
+    val TextSecondary = Color(0xFF8F9094)
+
+    /** 输入占位（截图实测 #B9BABC） */
+    val TextPlaceholder = Color(0xFFB9BABC)
+
+    /** 纯白 */
+    val White = Color(0xFFFFFFFF)
+
+    /** 列表/聊天页底色 */
+    val BgCanvas = Color(0xFFFFFFFF)
+
+    /** 设置页底色（靠卡片区分层级的页面） */
+    val BgGrouped = Color(0xFFF8F8F8)
+
+    /** 卡片 */
+    val Surface = Color(0xFFFFFFFF)
+
+    /** 搜索框 / 输入框填充 */
+    val Fill = Color(0xFFF5F5F5)
+
+    /** 分隔线 */
+    val Divider = Color(0xFFEDEDED)
+
+    /** 更深的填充（按压态 / 次级按钮） */
+    val FillStrong = Color(0xFFE1E1E1)
+
+    // ---------------------------------------------------------- 暗色
+    val DarkBg = Color(0xFF0F0F0F)
+    val DarkSurface = Color(0xFF171717)
+    val DarkSurfaceHigh = Color(0xFF262628)
+    val DarkFill = Color(0xFF1F1F1F)
+    val DarkTextPrimary = Color(0xFFEDEDED)
+    val DarkTextSecondary = Color(0xFF8C909F)
+    val DarkDivider = Color(0xFF2A2A2A)
+
+    // ---------------------------------------------------------- 语义
+    /** 来自 kx2 的 error 家族 */
+    val Danger = Color(0xFF93000A)
+    val DangerContainer = Color(0xFFFFDAD6)
+    val OnDangerContainer = Color(0xFF410002)
+
+    val Success = Color(0xFF1B7740)
+    val Warning = Color(0xFF8F6A00)
 }
 
-// ---------------------------------------------------------------- DeepSeek 品牌令牌
-/**
- * DeepSeek 品牌色。取自 APK 自身资源：
- *   values/colors.xml        → brandBlueLight = #426EFE
- *   values-night/colors.xml  → brandBlueDark  = #507BF2
- *   splashscreenBackground   → 亮 #FFFFFF / 暗 #0F0F0F
- */
-object DeepSeekColors {
-    /** 亮色主品牌蓝（R.color.primary） */
-    val BrandBlueLight = Color(0xFF426EFE)
+/** 明暗两套语义令牌，运行时按 dark 选择 */
+data class DshPalette(
+    val bg: Color,
+    val surface: Color,
+    val fill: Color,
+    val divider: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val textPlaceholder: Color,
+    val brand: Color,
+    val brandSoft: Color,
+    val onBrand: Color,
+    val userBubble: Color,
+    val onUserBubble: Color,
+    val assistantBubble: Color,
+    val danger: Color,
+    val success: Color,
+    val warning: Color,
+)
 
-    /** 暗色主品牌蓝（values-night R.color.primary） */
-    val BrandBlueDark = Color(0xFF507BF2)
+val LightPalette = DshPalette(
+    bg = DsColor.BgCanvas,
+    surface = DsColor.Surface,
+    fill = DsColor.Fill,
+    divider = DsColor.Divider,
+    textPrimary = DsColor.TextPrimary,
+    textSecondary = DsColor.TextSecondary,
+    textPlaceholder = DsColor.TextPlaceholder,
+    brand = DsColor.Brand,
+    brandSoft = DsColor.BrandSoft,
+    onBrand = DsColor.White,
+    userBubble = DsColor.Brand,
+    onUserBubble = DsColor.White,
+    assistantBubble = DsColor.Fill,
+    danger = DsColor.Danger,
+    success = DsColor.Success,
+    warning = DsColor.Warning,
+)
 
-    /** 亮色窗口底 */
-    val BgLight = Color(0xFFFFFFFF)
-
-    /** 暗色窗口底 */
-    val BgDark = Color(0xFF0F0F0F)
-
-    /** 品牌蓝的容器色（按 M3 惯例推出的浅/深阶，与品牌蓝同相） */
-    val BrandBlueContainerLight = Color(0xFFDCE4FF)
-    val OnBrandBlueContainerLight = Color(0xFF00205B)
-    val BrandBlueContainerDark = Color(0xFF2B4ACB)
-    val OnBrandBlueContainerDark = Color(0xFFDCE4FF)
-
-    /** 用户消息气泡（品牌蓝底白字） */
-    val UserBubbleLight = Color(0xFF426EFE)
-    val UserBubbleDark = Color(0xFF507BF2)
-
-    /** AI 消息气泡底 */
-    val AssistantBubbleLight = Color(0xFFF3F4F6)
-    val AssistantBubbleDark = Color(0xFF1F2023)
-
-    /** 思考/工具行的次级底色 */
-    val TraceBgLight = Color(0xFFFAFAFA)
-    val TraceBgDark = Color(0xFF161618)
-
-    /** 代码块 */
-    val CodeBgLight = Color(0xFFF6F7F9)
-    val CodeBgDark = Color(0xFF141518)
-
-    /** 语义色 */
-    val Green = Color(0xFF34C759)
-    val Amber = Color(0xFFFF9F0A)
-    val Red = Color(0xFFFF3B30)
-    val Violet = Color(0xFFAF52DE)
-}
+val DarkPalette = DshPalette(
+    bg = DsColor.DarkBg,
+    surface = DsColor.DarkSurface,
+    fill = DsColor.DarkFill,
+    divider = DsColor.DarkDivider,
+    textPrimary = DsColor.DarkTextPrimary,
+    textSecondary = DsColor.DarkTextSecondary,
+    textPlaceholder = DsColor.DarkTextSecondary.copy(alpha = 0.7f),
+    brand = DsColor.BrandNight,
+    brandSoft = DsColor.BrandBlueNightSoft,
+    onBrand = DsColor.White,
+    userBubble = DsColor.BrandNight,
+    onUserBubble = DsColor.White,
+    assistantBubble = DsColor.DarkSurfaceHigh,
+    danger = Color(0xFFFFB4AB),
+    success = Color(0xFF7FD69A),
+    warning = Color(0xFFF0C24B),
+)

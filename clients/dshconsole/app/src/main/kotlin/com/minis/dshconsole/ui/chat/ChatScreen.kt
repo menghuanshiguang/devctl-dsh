@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,21 +19,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -50,12 +50,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import com.minis.dshconsole.ui.components.AppIconButton
+import com.minis.dshconsole.ui.components.DsChip
+import com.minis.dshconsole.ui.components.DsCircleButton
 import com.minis.dshconsole.ui.components.brush.ShimmerOverlay
-import com.minis.dshconsole.ui.theme.AppTypography
+import com.minis.dshconsole.ui.theme.DsRadius
+import com.minis.dshconsole.ui.theme.DsSpacing
+import com.minis.dshconsole.ui.theme.DsType
 import com.minis.dshconsole.ui.theme.DshTheme
-import com.minis.dshconsole.ui.theme.Radii
-import com.minis.dshconsole.ui.theme.Spacing
 
 /*
  * 聊天页 —— 对应 DeepSeek 原包
@@ -66,24 +67,20 @@ import com.minis.dshconsole.ui.theme.Spacing
  *   ui/pages/chat/session/input/ChatInputActionBar.kt
  *   ui/markdown/MarkdownCodeBlockHeader.kt
  *
+ * 空态按截图实测还原：白底 + 居中品牌蓝 logo + “嗨！今天想聊些什么？”22sp 粗体 +
+ * 底部圆角输入卡（占位“发消息或按住说话” + 两个浅蓝胶囊 + ⊕ + 语音）。
+ *
  * 渲染方式与原包一致：
- *   消息列表 = LazyColumn + Modifier.animateItem(...)
- *     —— 原包正是 LazyLayoutAnimateItemElement(fadeInSpec, placementSpec, fadeOutSpec)
+ *   消息列表 = LazyColumn + Modifier.animateItem()
+ *     —— 原包即 LazyLayoutAnimateItemElement(fadeInSpec, placementSpec, fadeOutSpec)
  *   流式期间正文按纯文本追加（字符只增不改 → 不触发整行重排），收尾再一次性解析 Markdown
- *     —— 这与原包 _DSFMLexer 按 [start,end) 区间增量解析是同一思路
+ *     —— 与原包 _DSFMLexer 按增量区间解析同思路
  */
 
-// ---------------------------------------------------------------- 数据模型
-
-/** 对应 domain.chat.model.completion.message.fragments.* */
 sealed interface ChatFragment {
     data class TextFragment(val text: String) : ChatFragment
     data class ReasoningFragment(val text: String) : ChatFragment
-    data class ToolFragment(
-        val name: String,
-        val summary: String,
-        val state: ToolState,
-    ) : ChatFragment
+    data class ToolFragment(val name: String, val summary: String, val state: ToolState) : ChatFragment
 }
 
 enum class ToolState { Running, Ok, Error }
@@ -95,243 +92,215 @@ data class ChatMessage(
     val streaming: Boolean = false,
 )
 
-// ---------------------------------------------------------------- 页面
-
 @Composable
 fun ChatScreen(
-    title: String,
-    subtitle: String?,
     messages: List<ChatMessage>,
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier,
+    deepThink: Boolean = false,
+    webSearch: Boolean = false,
+    onToggleThink: () -> Unit = {},
+    onToggleSearch: () -> Unit = {},
 ) {
-    val listState = rememberLazyListState()
-    var draft by remember { mutableStateOf("") }
-
-    // 流式追加时每帧钉在底部（瞬时 scrollTo，不做平滑动画 —— 避免动画互相打断导致抖动）
-    LaunchedEffect(messages.size, messages.lastOrNull()?.fragments?.size) {
-        val last = listState.layoutInfo.totalItemsCount - 1
-        if (last >= 0) listState.scrollToItem(last)
-    }
-
-    Column(modifier = modifier.fillMaxSize().imePadding()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(
-                horizontal = Spacing.messageH,
-                vertical = Spacing.s4,
-            ),
-            verticalArrangement = Arrangement.spacedBy(Spacing.messageGap),
-        ) {
-            items(messages, key = { it.id }) { msg ->
-                Box(Modifier.fillMaxWidth().animateItem()) {
-                    if (msg.fromUser) UserMessageCell(msg) else AssistantMessageCell(msg)
-                }
-            }
+    Column(modifier.fillMaxSize().background(DshTheme.p.bg).imePadding()) {
+        if (messages.isEmpty()) {
+            EmptyState(Modifier.weight(1f))
+        } else {
+            MessageList(messages, Modifier.weight(1f))
         }
-        ChatInputBar(
-            value = draft,
-            onValueChange = { draft = it },
-            onSend = {
-                val t = draft.trim()
-                if (t.isNotEmpty()) {
-                    onSend(t)
-                    draft = ""
-                }
-            },
+        ChatInputCard(
+            onSend = onSend,
+            deepThink = deepThink,
+            webSearch = webSearch,
+            onToggleThink = onToggleThink,
+            onToggleSearch = onToggleSearch,
         )
     }
 }
 
-// ---------------------------------------------------------------- 用户气泡
+// ---------------------------------------------------------------- 空态
 
-/** 对应 UserChatMessageCell.kt / UserChatMessageBubble.kt */
 @Composable
-private fun UserMessageCell(msg: ChatMessage) {
-    val text = msg.fragments.filterIsInstance<ChatFragment.TextFragment>().joinToString("") { it.text }
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+private fun EmptyState(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(DshTheme.p.brandSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.TravelExplore,
+                    null,
+                    tint = DshTheme.p.brand,
+                    modifier = Modifier.size(40.dp),
+                )
+            }
+            Spacer(Modifier.height(DsSpacing.s5))
+            Text("嗨！今天想聊些什么？", style = DsType.greeting, color = DshTheme.p.textPrimary)
+        }
+    }
+}
+
+// ---------------------------------------------------------------- 列表
+
+@Composable
+private fun MessageList(messages: List<ChatMessage>, modifier: Modifier = Modifier) {
+    val state = rememberLazyListState()
+    LaunchedEffect(messages.size, messages.lastOrNull()?.fragments?.size) {
+        val last = state.layoutInfo.totalItemsCount - 1
+        if (last >= 0) state.scrollToItem(last)
+    }
+    LazyColumn(
+        state = state,
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(
+            horizontal = DsSpacing.screenH,
+            vertical = DsSpacing.s4,
+        ),
+        verticalArrangement = Arrangement.spacedBy(DsSpacing.s4),
     ) {
+        items(messages, key = { it.id }) { msg ->
+            Box(Modifier.fillMaxWidth().animateItem()) {
+                if (msg.fromUser) UserCell(msg) else AssistantCell(msg)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserCell(msg: ChatMessage) {
+    val text = msg.fragments.filterIsInstance<ChatFragment.TextFragment>().joinToString("") { it.text }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Box(
             Modifier
                 .fillMaxWidth(0.82f)
                 .clip(
                     RoundedCornerShape(
-                        topStart = Radii.bubble,
-                        topEnd = Radii.bubble,
-                        bottomStart = Radii.bubble,
-                        bottomEnd = Radii.bubbleTail,
+                        topStart = DsRadius.bubble,
+                        topEnd = DsRadius.bubble,
+                        bottomStart = DsRadius.bubble,
+                        bottomEnd = DsRadius.bubbleTail,
                     )
                 )
-                .background(DshTheme.colors.userBubble)
+                .background(DshTheme.p.userBubble)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
-            Text(
-                text,
-                style = AppTypography.markdownBody,
-                color = DshTheme.colors.onUserBubble,
-            )
+            Text(text, style = DsType.body, color = DshTheme.p.onUserBubble)
         }
     }
 }
 
-// ---------------------------------------------------------------- 助手消息
-
-/** 对应 AssistantFragmentGroup.kt —— 思考/工具过程行 + 正文 */
 @Composable
-private fun AssistantMessageCell(msg: ChatMessage) {
+private fun AssistantCell(msg: ChatMessage) {
     Column(Modifier.fillMaxWidth()) {
-        val traces = msg.fragments.filter { it is ChatFragment.ReasoningFragment || it is ChatFragment.ToolFragment }
+        val traces = msg.fragments.filter {
+            it is ChatFragment.ReasoningFragment || it is ChatFragment.ToolFragment
+        }
         if (traces.isNotEmpty()) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radii.card))
-                    .background(DshTheme.colors.traceBackground)
-                    .padding(horizontal = Spacing.s3, vertical = Spacing.s2),
-                verticalArrangement = Arrangement.spacedBy(Spacing.traceGap),
+                    .clip(RoundedCornerShape(DsRadius.card))
+                    .background(DshTheme.p.fill)
+                    .padding(horizontal = DsSpacing.s3, vertical = DsSpacing.s2),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 traces.forEach { f ->
                     when (f) {
-                        is ChatFragment.ReasoningFragment ->
-                            TraceRow(
-                                icon = Icons.Filled.Psychology,
-                                label = "思考",
-                                summary = f.text.lineSequence().firstOrNull().orEmpty(),
-                                running = msg.streaming,
-                            )
-                        is ChatFragment.ToolFragment ->
-                            TraceRow(
-                                icon = Icons.Filled.Build,
-                                label = f.name,
-                                summary = f.summary,
-                                running = f.state == ToolState.Running,
-                                failed = f.state == ToolState.Error,
-                            )
+                        is ChatFragment.ReasoningFragment -> TraceRow(
+                            Icons.Filled.Psychology, "思考",
+                            f.text.lineSequence().firstOrNull().orEmpty(), msg.streaming,
+                        )
+                        is ChatFragment.ToolFragment -> TraceRow(
+                            Icons.Filled.Build, f.name, f.summary,
+                            f.state == ToolState.Running, f.state == ToolState.Error,
+                        )
                         else -> Unit
                     }
                 }
             }
-            Spacer(Modifier.height(Spacing.groupGap))
+            Spacer(Modifier.height(DsSpacing.s3))
         }
-
         val body = msg.fragments.filterIsInstance<ChatFragment.TextFragment>().joinToString("") { it.text }
-        if (body.isNotEmpty()) {
-            MarkdownBody(body)
-        }
+        if (body.isNotEmpty()) MarkdownBody(body)
     }
 }
 
-/**
- * 过程行（思考 / 工具）。
- * 折叠态就是一行摘要 —— 与原包 ReasoningRow / ToolRow 的行为一致：
- * 流式中摘要显示"最后一段已完成内容的首行"，结算后显示全文首行。
- */
 @Composable
 private fun TraceRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     summary: String,
     running: Boolean,
     failed: Boolean = false,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val summaryColor by animateColorAsState(
+    val p = DshTheme.p
+    val color by animateColorAsState(
         when {
-            failed -> DshTheme.colors.danger
-            running -> scheme.onSurfaceVariant
-            else -> scheme.onSurfaceVariant.copy(alpha = 0.75f)
+            failed -> p.danger
+            running -> p.textSecondary
+            else -> p.textSecondary.copy(alpha = 0.75f)
         },
-        label = "traceColor",
+        label = "trace",
     )
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Icon(icon, null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
-        Spacer(Modifier.width(Spacing.s2))
-        Text(label, style = AppTypography.traceSummary, color = scheme.onSurface, maxLines = 1)
-        Spacer(Modifier.width(Spacing.s2))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = p.textSecondary, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(DsSpacing.s2))
+        Text(label, style = DsType.trace, color = p.textPrimary, maxLines = 1)
+        Spacer(Modifier.width(DsSpacing.s2))
         Box(Modifier.weight(1f)) {
-            Text(
-                summary,
-                style = AppTypography.traceSummary,
-                color = summaryColor,
-                maxLines = 1,
-            )
+            Text(summary, style = DsType.trace, color = color, maxLines = 1)
             if (running) ShimmerOverlay()
         }
         if (running) {
-            Spacer(Modifier.width(Spacing.s2))
-            ProgressDot()
+            Spacer(Modifier.width(DsSpacing.s2))
+            Box(Modifier.size(6.dp).clip(CircleShape).background(p.brand))
         }
     }
 }
 
-/** 运行中的三点头（对应原包的运行指示） */
-@Composable
-private fun ProgressDot() {
-    Box(
-        Modifier
-            .size(6.dp)
-            .clip(RoundedCornerShape(Radii.pill))
-            .background(MaterialTheme.colorScheme.primary)
-    )
-}
-
 // ---------------------------------------------------------------- 正文
 
-/**
- * 轻量 Markdown：行内 `code`、**粗体**、围栏代码块。
- * 与原包一样，代码块带一条"语言 + 复制"的头部横幅（MarkdownCodeBlockHeader.kt）。
- */
 @Composable
 private fun MarkdownBody(text: String) {
-    val scheme = MaterialTheme.colorScheme
+    val p = DshTheme.p
     Column(Modifier.fillMaxWidth()) {
-        val blocks = remember(text) { splitFences(text) }
-        blocks.forEach { (lang, content) ->
+        remember(text) { splitFences(text) }.forEach { (lang, content) ->
             if (lang == null) {
-                Text(
-                    inlineMarkdown(content),
-                    style = AppTypography.markdownBody,
-                    color = scheme.onSurface,
-                )
+                Text(inlineMarkdown(content), style = DsType.body, color = p.textPrimary)
             } else {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(Radii.code))
-                        .background(DshTheme.colors.codeBackground)
-                        .border(1.dp, scheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(Radii.code)),
+                        .clip(RoundedCornerShape(DsRadius.code))
+                        .background(p.fill)
+                        .border(1.dp, p.divider, RoundedCornerShape(DsRadius.code)),
                 ) {
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.s3, vertical = 7.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = DsSpacing.s3, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             lang.ifEmpty { "text" },
-                            style = AppTypography.markdownBodySmall,
-                            color = scheme.onSurfaceVariant,
+                            style = DsType.bodySmall,
+                            color = p.textSecondary,
                             fontFamily = FontFamily.Monospace,
                         )
                         Spacer(Modifier.weight(1f))
-                        Text(
-                            "复制",
-                            style = AppTypography.markdownBodySmall,
-                            color = scheme.primary,
-                        )
+                        Text("复制", style = DsType.bodySmall, color = p.brand)
                     }
                     Text(
                         content.trimEnd('\n'),
-                        style = AppTypography.code,
-                        color = scheme.onSurface,
-                        modifier = Modifier.padding(horizontal = Spacing.s3, vertical = Spacing.s3),
+                        style = DsType.code,
+                        color = p.textPrimary,
+                        modifier = Modifier.padding(DsSpacing.s3),
                     )
                 }
             }
-            Spacer(Modifier.height(Spacing.s2))
+            Spacer(Modifier.height(DsSpacing.s2))
         }
     }
 }
@@ -342,8 +311,7 @@ private fun splitFences(text: String): List<Pair<String?, String>> {
     var i = 0
     val plain = StringBuilder()
     while (i < lines.size) {
-        val line = lines[i]
-        val trimmed = line.trimStart()
+        val trimmed = lines[i].trimStart()
         if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
             if (plain.isNotEmpty()) {
                 out += null to plain.toString()
@@ -361,7 +329,7 @@ private fun splitFences(text: String): List<Pair<String?, String>> {
             }
             out += lang to body.toString()
         } else {
-            plain.append(line).append('\n')
+            plain.append(lines[i]).append('\n')
         }
         i++
     }
@@ -400,61 +368,72 @@ private fun inlineMarkdown(src: String): AnnotatedString = buildAnnotatedString 
     }
 }
 
-// ---------------------------------------------------------------- 输入栏
+// ---------------------------------------------------------------- 输入卡
 
-/** 对应 ChatInputActionBar.kt —— 圆角输入卡片 + 右侧发送按钮 */
 @Composable
-private fun ChatInputBar(
-    value: String,
-    onValueChange: (String) -> Unit,
-    onSend: () -> Unit,
+private fun ChatInputCard(
+    onSend: (String) -> Unit,
+    deepThink: Boolean,
+    webSearch: Boolean,
+    onToggleThink: () -> Unit,
+    onToggleSearch: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val enabled = value.isNotBlank()
-    Row(
+    val p = DshTheme.p
+    var draft by remember { mutableStateOf("") }
+    val canSend = draft.isNotBlank()
+
+    Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.screenH, vertical = Spacing.s2),
-        verticalAlignment = Alignment.Bottom,
+            .padding(horizontal = DsSpacing.screenH, vertical = DsSpacing.s2)
+            .clip(RoundedCornerShape(DsRadius.sheet))
+            .background(p.surface)
+            .padding(horizontal = DsSpacing.s4, vertical = DsSpacing.s3),
     ) {
-        Box(
-            Modifier
-                .weight(1f)
-                .heightIn(min = 44.dp)
-                .clip(RoundedCornerShape(Radii.input))
-                .background(scheme.surfaceContainerHigh)
-                .padding(horizontal = Spacing.s4, vertical = Spacing.s3),
-        ) {
-            if (value.isEmpty()) {
+        Box(Modifier.fillMaxWidth().height(48.dp)) {
+            if (draft.isEmpty()) {
                 Text(
-                    "发消息…",
-                    style = AppTypography.markdownBody,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    "发消息或按住说话",
+                    style = DsType.body,
+                    color = p.textPlaceholder,
+                    modifier = Modifier.align(Alignment.CenterStart),
                 )
             }
             BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                textStyle = AppTypography.markdownBody.copy(color = scheme.onSurface),
-                cursorBrush = SolidColor(scheme.primary),
-                modifier = Modifier.fillMaxWidth(),
+                value = draft,
+                onValueChange = { draft = it },
+                textStyle = DsType.body.copy(color = p.textPrimary),
+                cursorBrush = SolidColor(p.brand),
+                modifier = Modifier.fillMaxWidth().align(Alignment.CenterStart),
             )
         }
-        Spacer(Modifier.width(Spacing.s2))
-        Box(
-            Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(Radii.pill))
-                .background(if (enabled) scheme.primary else scheme.surfaceContainerHighest),
-            contentAlignment = Alignment.Center,
-        ) {
-            AppIconButton(
-                icon = Icons.Filled.ArrowUpward,
-                contentDescription = "发送",
-                onClick = { if (enabled) onSend() },
-                tint = if (enabled) scheme.onPrimary else scheme.onSurfaceVariant,
+        Spacer(Modifier.height(DsSpacing.s2))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DsChip(
+                "深度思考",
+                icon = Icons.Filled.Psychology,
+                selected = deepThink,
+                onClick = onToggleThink,
             )
+            Spacer(Modifier.width(DsSpacing.s2))
+            DsChip(
+                "智能搜索",
+                icon = Icons.Filled.TravelExplore,
+                selected = webSearch,
+                onClick = onToggleSearch,
+            )
+            Spacer(Modifier.weight(1f))
+            if (canSend) {
+                DsCircleButton(
+                    Icons.Filled.ArrowUpward, "发送",
+                    { onSend(draft.trim()); draft = "" },
+                    container = p.brand, tint = p.onBrand,
+                )
+            } else {
+                DsCircleButton(Icons.Filled.Add, "更多", {})
+                Spacer(Modifier.width(DsSpacing.s1))
+                DsCircleButton(Icons.Filled.GraphicEq, "语音", {})
+            }
         }
     }
 }
-

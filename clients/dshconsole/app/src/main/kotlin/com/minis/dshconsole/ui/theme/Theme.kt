@@ -2,7 +2,6 @@ package com.minis.dshconsole.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -12,124 +11,96 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /*
- * 对应 DeepSeek 原包的 com.deepseek.chat.ui.theme.DeepSeekTheme (Theme.kt)
+ * 对应 DeepSeek 原包 com.deepseek.chat.ui.theme.DeepSeekTheme (Theme.kt)
  *
- * 原包 Theme.kt 结构（从源码位置字符串还原）：
- *    :28  DeepSeekTheme(…)                 主题入口 composable
- *    :38  DeepSeekTheme.<anonymous>        内部 lambda
- *    :49  DeepSeekTheme.<anonymous>.<anonymous>
- *    :56  ForceDark(…)                     强制暗色（跟随系统/跟随设置/强制）
- *    :64  DeepSeekTheme.colorSchemeV2      取色方案（v2）
- *    :92  fallback.fallbackMaterialColorScheme   拿不到远端主题时的回退色板
+ * 原包 Theme.kt 的结构（由 Compose 源码位置字符串还原）：
+ *   :28  DeepSeekTheme(…)             主题入口
+ *   :38  DeepSeekTheme.<anonymous>
+ *   :49  DeepSeekTheme.<anonymous>.<anonymous>
+ *   :56  ForceDark(…)                 强制暗色
+ *   :64  DeepSeekTheme.colorSchemeV2  运行时色板（读 kx2）
+ *   :92  fallback.fallbackMaterialColorScheme   拿不到远端主题时的回退
+ *
+ * 这里用同一套结构：MaterialTheme 承载 M3 内建控件，
+ * 同时把实测出来的 DSH 语义令牌通过 CompositionLocal 下发。
  */
 
-/** 亮色方案：M3 baseline 打底，品牌蓝覆盖 primary 家族与窗口底 */
-private val LightScheme: ColorScheme = lightColorScheme(
-    primary = DeepSeekColors.BrandBlueLight,
-    onPrimary = M3Baseline.white,
-    primaryContainer = DeepSeekColors.BrandBlueContainerLight,
-    onPrimaryContainer = DeepSeekColors.OnBrandBlueContainerLight,
-    inversePrimary = M3Baseline.inversePrimary,
+private val LightScheme = lightColorScheme(
+    primary = DsColor.Brand,
+    onPrimary = DsColor.White,
+    primaryContainer = DsColor.BrandSoft,
+    onPrimaryContainer = DsColor.BlueDarkest,
 
-    secondary = M3Baseline.secondary,
-    onSecondary = M3Baseline.onSecondary,
-    secondaryContainer = M3Baseline.secondaryContainer,
-    onSecondaryContainer = M3Baseline.onSecondaryContainer,
+    secondary = DsColor.TextSecondary,
+    onSecondary = DsColor.White,
+    secondaryContainer = DsColor.Fill,
+    onSecondaryContainer = DsColor.TextPrimary,
 
-    tertiary = M3Baseline.tertiary,
-    onTertiary = M3Baseline.onTertiary,
-    tertiaryContainer = M3Baseline.tertiaryContainer,
-    onTertiaryContainer = M3Baseline.onTertiaryContainer,
+    tertiary = DsColor.BlueMid,
+    onTertiary = DsColor.White,
 
-    background = DeepSeekColors.BgLight,
-    onBackground = M3Baseline.onSurface,
-    surface = DeepSeekColors.BgLight,
-    onSurface = M3Baseline.onSurface,
-    surfaceVariant = M3Baseline.surfaceVariant,
-    onSurfaceVariant = M3Baseline.onSurfaceVariant,
+    background = DsColor.BgCanvas,
+    onBackground = DsColor.TextPrimary,
+    surface = DsColor.Surface,
+    onSurface = DsColor.TextPrimary,
+    surfaceVariant = DsColor.Fill,
+    onSurfaceVariant = DsColor.TextSecondary,
 
-    surfaceDim = M3Baseline.surfaceDim,
-    surfaceBright = M3Baseline.surfaceBright,
-    surfaceContainerLowest = M3Baseline.surfaceContainerLowest,
-    surfaceContainerLow = M3Baseline.surfaceContainerLow,
-    surfaceContainer = M3Baseline.surfaceContainer,
-    surfaceContainerHigh = M3Baseline.surfaceContainerHigh,
-    surfaceContainerHighest = M3Baseline.surfaceContainerHighest,
+    surfaceContainerLowest = DsColor.White,
+    surfaceContainerLow = DsColor.BgGrouped,
+    surfaceContainer = DsColor.Fill,
+    surfaceContainerHigh = DsColor.FillStrong,
+    surfaceContainerHighest = DsColor.FillStrong,
 
-    inverseSurface = M3Baseline.inverseSurface,
-    inverseOnSurface = M3Baseline.inverseOnSurface,
+    outline = DsColor.TextSecondary,
+    outlineVariant = DsColor.Divider,
+    scrim = Color(0x99000000),
 
-    error = M3Baseline.error,
-    onError = M3Baseline.onError,
-    errorContainer = M3Baseline.errorContainer,
-    onErrorContainer = M3Baseline.onErrorContainer,
-
-    outline = M3Baseline.outline,
-    outlineVariant = M3Baseline.outlineVariant,
-    scrim = M3Baseline.scrim,
+    error = DsColor.Danger,
+    onError = DsColor.White,
+    errorContainer = DsColor.DangerContainer,
+    onErrorContainer = DsColor.OnDangerContainer,
 )
 
-/** 暗色方案：primary 换成 values-night 的 #507BF2，窗口底 #0F0F0F */
-private val DarkScheme: ColorScheme = darkColorScheme(
-    primary = DeepSeekColors.BrandBlueDark,
-    onPrimary = M3Baseline.white,
-    primaryContainer = DeepSeekColors.BrandBlueContainerDark,
-    onPrimaryContainer = DeepSeekColors.OnBrandBlueContainerDark,
-    inversePrimary = Color(0xFFB4C5FF),
+private val DarkScheme = darkColorScheme(
+    primary = DsColor.BrandNight,
+    onPrimary = DsColor.White,
+    primaryContainer = DsColor.BrandBlueNightSoft,
+    onPrimaryContainer = DsColor.BlueSoft2,
 
-    background = DeepSeekColors.BgDark,
-    onBackground = Color(0xFFE6E1E5),
-    surface = DeepSeekColors.BgDark,
-    onSurface = Color(0xFFE6E1E5),
-    surfaceVariant = Color(0xFF49454F),
-    onSurfaceVariant = Color(0xFFCAC4D0),
+    background = DsColor.DarkBg,
+    onBackground = DsColor.DarkTextPrimary,
+    surface = DsColor.DarkSurface,
+    onSurface = DsColor.DarkTextPrimary,
+    surfaceVariant = DsColor.DarkSurfaceHigh,
+    onSurfaceVariant = DsColor.DarkTextSecondary,
 
-    surfaceDim = Color(0xFF0F0F0F),
-    surfaceBright = Color(0xFF39393B),
-    surfaceContainerLowest = Color(0xFF0A0A0C),
-    surfaceContainerLow = Color(0xFF161618),
-    surfaceContainer = Color(0xFF1B1B1D),
-    surfaceContainerHigh = Color(0xFF262628),
+    surfaceContainerLowest = DsColor.DarkBg,
+    surfaceContainerLow = DsColor.DarkSurface,
+    surfaceContainer = DsColor.DarkFill,
+    surfaceContainerHigh = DsColor.DarkSurfaceHigh,
     surfaceContainerHighest = Color(0xFF313133),
 
-    inverseSurface = Color(0xFFE6E1E5),
-    inverseOnSurface = Color(0xFF313033),
+    outline = DsColor.DarkTextSecondary,
+    outlineVariant = DsColor.DarkDivider,
+    scrim = Color(0xCC000000),
 
-    error = Color(0xFFF2B8B5),
-    onError = Color(0xFF601410),
-    errorContainer = Color(0xFF8C1D18),
-    onErrorContainer = Color(0xFFF9DEDC),
-
-    outline = Color(0xFF938F99),
-    outlineVariant = Color(0xFF49454F),
-    scrim = Color(0xFF000000),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
 )
 
-/** DSH 客户端自己的扩展令牌（气泡、思考行、代码块等 M3 没覆盖的） */
-data class DshExtendedColors(
-    val userBubble: Color,
-    val onUserBubble: Color,
-    val assistantBubble: Color,
-    val traceBackground: Color,
-    val codeBackground: Color,
-    val success: Color,
-    val warning: Color,
-    val danger: Color,
-    val accentViolet: Color,
-)
+private val LocalPalette = staticCompositionLocalOf { LightPalette }
 
-private val LocalDshColors = staticCompositionLocalOf<DshExtendedColors> {
-    error("DshColors 未提供")
-}
-
+/** 取 DSH 实测语义令牌 */
 object DshTheme {
-    val colors: DshExtendedColors
-        @Composable get() = LocalDshColors.current
+    val p: DshPalette
+        @Composable get() = LocalPalette.current
 }
 
 @Composable
@@ -137,32 +108,24 @@ fun DshTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val palette = if (darkTheme) DarkPalette else LightPalette
     val scheme = if (darkTheme) DarkScheme else LightScheme
-    val ext = DshExtendedColors(
-        userBubble = if (darkTheme) DeepSeekColors.UserBubbleDark else DeepSeekColors.UserBubbleLight,
-        onUserBubble = Color.White,
-        assistantBubble = if (darkTheme) DeepSeekColors.AssistantBubbleDark else DeepSeekColors.AssistantBubbleLight,
-        traceBackground = if (darkTheme) DeepSeekColors.TraceBgDark else DeepSeekColors.TraceBgLight,
-        codeBackground = if (darkTheme) DeepSeekColors.CodeBgDark else DeepSeekColors.CodeBgLight,
-        success = DeepSeekColors.Green,
-        warning = DeepSeekColors.Amber,
-        danger = DeepSeekColors.Red,
-        accentViolet = DeepSeekColors.Violet,
-    )
 
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
             @Suppress("DEPRECATION")
-            window.statusBarColor = scheme.surface.toArgb()
+            window.statusBarColor = Color.Transparent.toArgb()
             @Suppress("DEPRECATION")
-            window.navigationBarColor = scheme.surface.toArgb()
+            window.navigationBarColor = Color.Transparent.toArgb()
         }
     }
 
-    CompositionLocalProvider(LocalDshColors provides ext) {
+    CompositionLocalProvider(LocalPalette provides palette) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
