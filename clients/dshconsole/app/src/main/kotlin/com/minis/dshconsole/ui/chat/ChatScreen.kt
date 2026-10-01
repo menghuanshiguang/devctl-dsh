@@ -166,6 +166,7 @@ fun ChatScreen(
 @Composable
 private fun MessageList(messages: List<ChatMessage>, modifier: Modifier = Modifier) {
     val state = rememberLazyListState()
+    var previousSize by remember { mutableStateOf(0) }
 
     // ★ 自动到底 ★
     // 之前用 messages.size / fragments.size 当 key —— 但 delta 只改【文本长度】，
@@ -190,14 +191,16 @@ private fun MessageList(messages: List<ChatMessage>, modifier: Modifier = Modifi
         }
     }
 
+    // ★ 下标必须以 messages 为准，不能用 state.layoutInfo.totalItemsCount ★
+    // totalItemsCount 是上一帧的旧值：tail 里先 clear() 再逐条 add，
+    // 列表缩小的瞬间 scrollToItem(旧下标) 会踩空 →
+    //   SnapshotStateList.get -> IndexOutOfBoundsException（崩溃栈就是这个）
     LaunchedEffect(messages.size, lastLen) {
-        val last = state.layoutInfo.totalItemsCount - 1
-        if (last >= 0 && atBottom) state.scrollToItem(last)
-    }
-    // 新消息进来时（用户自己发的）无条件跳到底
-    LaunchedEffect(messages.size) {
-        val last = state.layoutInfo.totalItemsCount - 1
-        if (last >= 0) state.scrollToItem(last)
+        val last = messages.lastIndex
+        if (last >= 0 && (atBottom || messages.size != previousSize)) {
+            runCatching { state.scrollToItem(last) }
+        }
+        previousSize = messages.size
     }
 
     LazyColumn(
