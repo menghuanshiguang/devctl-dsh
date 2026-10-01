@@ -22,8 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
@@ -144,11 +144,12 @@ fun DsDrawerLayout(
         Box(
             Modifier
                 .fillMaxSize()
-                .scale(
-                    scale = contentScale,
+                .graphicsLayer {
+                    scaleX = contentScale
+                    scaleY = contentScale
                     // 锚点在左边缘中点：内容向左侧（靠近抽屉的那一边）收缩
-                    transformOrigin = TransformOrigin(0f, 0.5f),
-                )
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                }
                 .offset { IntOffset((drawerPx * p).roundToInt(), 0) }
                 .shadow(
                     elevation = ContentShadow * p,   // 投影随进度淡入，圆角保持恒定
