@@ -5,18 +5,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
@@ -54,7 +51,8 @@ import kotlinx.coroutines.launch
 /**
  * DSHConsole v2 —— UI 用 DeepSeek 客户端同款实现方式重做。
  *
- * 对应原包 com.deepseek.chat.MainActivity（Compose 单 Activity + 抽屉导航）。
+ * 对应原包 com.deepseek.chat.MainActivity：Compose 单 Activity + 抽屉导航，
+ * 界面全部由 DeepSeekTheme(DshTheme) 提供的设计令牌驱动。
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,33 +62,32 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private const val WELCOME_BODY = """DSH 客户端 UI 已切换到 **DeepSeek 同款实现方式**（Jetpack Compose）。
+
+```kotlin
+DshTheme {
+    ChatScreen(messages = messages, onSend = { ... })
+}
+```
+
+发一条消息试试流式渲染、思考行与工具行的效果。"""
+
 @Composable
 private fun DshConsoleRoot() {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val messages = remember { mutableStateListOf<ChatMessage>() }
-    var sessionTitle by remember { mutableStateOf("新的会话") }
 
-    // 首次进入放一条欢迎消息，便于观察排版
-    var seeded by remember { mutableStateOf(false) }
-    if (!seeded) {
-        seeded = true
-        messages.add(
+    // 首屏在 remember 里种一条欢迎消息（避免在组合期写 SnapshotStateList）
+    val messages = remember {
+        mutableStateListOf(
             ChatMessage(
                 id = "welcome",
                 fromUser = false,
-                fragments = listOf(
-                    ChatFragment.TextFragment(
-                        "DSH 客户端 UI 已切换到 **DeepSeek 同款实现方式**（Jetpack Compose）。\n\n" +
-                            "```kotlin\n" +
-                            "DshTheme {\n    ChatScreen(...)\n}\n" +
-                            "```\n" +
-                            "发一条消息试试流式渲染效果。"
-                    )
-                ),
+                fragments = listOf(ChatFragment.TextFragment(WELCOME_BODY)),
             )
         )
     }
+    var sessionTitle by remember { mutableStateOf("新的会话") }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -119,7 +116,9 @@ private fun DshConsoleRoot() {
                             fragments = listOf(ChatFragment.TextFragment(text)),
                         )
                     )
-                    if (sessionTitle == "新的会话") sessionTitle = text.take(12)
+                    if (sessionTitle == "新的会话") {
+                        sessionTitle = text.take(12)
+                    }
                     messages.add(
                         ChatMessage(
                             id = "a${messages.size}",
@@ -132,17 +131,19 @@ private fun DshConsoleRoot() {
                         )
                     )
                     scope.launch {
-                        delay(600)
+                        delay(700)
                         val idx = messages.lastIndex
-                        val old = messages[idx]
-                        messages[idx] = old.copy(
-                            streaming = false,
-                            fragments = listOf(
-                                ChatFragment.ReasoningFragment("正在分析请求…"),
-                                ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Ok),
-                                ChatFragment.TextFragment("收到：$text"),
-                            ),
-                        )
+                        if (idx >= 0 && !messages[idx].fromUser) {
+                            val old = messages[idx]
+                            messages[idx] = old.copy(
+                                streaming = false,
+                                fragments = listOf(
+                                    ChatFragment.ReasoningFragment("正在分析请求…"),
+                                    ChatFragment.ToolFragment("bash", "读取会话上下文", ToolState.Ok),
+                                    ChatFragment.TextFragment("收到：$text"),
+                                ),
+                            )
+                        }
                     }
                 },
             )
@@ -184,7 +185,11 @@ private fun DshDrawer() {
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.fillMaxWidth().padding(top = Spacing.s6)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = Spacing.s6)
+        ) {
             Text(
                 "DSHConsole",
                 style = AppTypography.topBarTitle,

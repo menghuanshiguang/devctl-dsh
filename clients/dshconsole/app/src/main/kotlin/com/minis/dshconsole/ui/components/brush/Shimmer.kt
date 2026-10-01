@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -66,14 +68,14 @@ fun ShimmerOverlay(
     val progress by rememberShimmerProgress(periodMillis)
     val base = Color.Transparent
     val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
-    var size = remember { IntSize.Zero }
+    val size = remember { mutableStateOf(IntSize.Zero) }
     Box(
         modifier
-            .onSizeChanged { size = it }
+            .onSizeChanged { size.value = it }
             .background(
                 shimmerBrush(
                     progress = progress,
-                    width = size.width.coerceAtLeast(1).toFloat(),
+                    width = size.value.width.coerceAtLeast(1).toFloat(),
                     base = base,
                     highlight = highlight,
                 )
