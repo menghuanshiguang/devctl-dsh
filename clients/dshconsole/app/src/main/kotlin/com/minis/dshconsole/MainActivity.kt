@@ -137,6 +137,13 @@ private fun RootBody(prefs: DshPrefs, controller: DshController) {
                 expandedIds = controller.expandedWorkspaces,
                 sessionsOf = { controller.sessionsOf(it) },
                 onToggleWorkspace = { controller.toggleWorkspace(it) },
+                onNewSession = {
+                    controller.createSession { sid ->
+                        sessionTitle = NEW_SESSION
+                        screen = Screen.Chat
+                        drawerOpen = false
+                    }
+                },
                 connected = controller.connected,
                 accountName = controller.hostName.ifEmpty { "未连接" },
                 selectedId = controller.currentSessionId,
@@ -244,6 +251,9 @@ private fun RootBody(prefs: DshPrefs, controller: DshController) {
                         webSearch = webSearch,
                         onToggleThink = { deepThink = !deepThink },
                         onToggleSearch = { webSearch = !webSearch },
+                        queue = controller.queue,
+                        onRemoveQueued = { controller.removeQueued(it) },
+                        onSteerQueued = { controller.steerQueued(it) },
                         onSend = { text -> controller.send(text) },
                     )
                 }

@@ -126,6 +126,99 @@ class DshController(private val appContext: Context) {
     private var uidSeq = 0L
     private fun uid(prefix: String): String = "$prefix-" + (uidSeq++)
 
+    /**
+     * 挂起（排队）的消息 —— 对应协议 sessions.inbox。
+     * host 返回 { nextTurn, nextStep }，每项 { id, source, rpcId?, text, images[] }。
+     * 依据来源分两类：
+     *   nextStep 里的 = 会「嵌入」当前正在跑的这一轮（steer）
+     *   nextTurn 里的 = 排到下一轮才发（挂起）
+     */
+    data class QueuedItem(val id: String, val text: String, val embedded: Boolean, val rpcId: String? = null)
+
+    val queue = mutableStateListOf<QueuedItem>()
+
+    /** 拉一次信箱，与本地乐观行对账 */
+    fun refreshInbox() {
+        val d = dsh ?: return
+        val sid = currentSessionId ?: return
+        runCatching {
+            val r = d.request("sessions.inbox", JSONObject().put("sessionId", sid), 12000, null)
+            val list = ArrayList<QueuedItem>()
+            fun take(arr: JSONArray?, embedded: Boolean) {
+                if (arr == null) return
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = pick(o, "id", "itemId")
+                    if (id.isEmpty()) continue
+                    list.add(
+                        QueuedItem(
+                            id = id,
+                            text = pick(o, "text", "content"),
+                            embedded = embedded,
+                            rpcId = pick(o, "rpcId").ifEmpty { null },
+                        )
+                    )
+                }
+            }
+            take(r.optJSONArray("nextStep"), true)
+            take(r.optJSONArray("nextTurn"), false)
+            queue.clear()
+            queue.addAll(list)
+        }.onFailure { dbg("inbox 失败：${it.message}") }
+    }
+
+    /** 撤回：从队列里删掉 */
+    fun removeQueued(itemId: String) {
+        val d = dsh ?: return
+        val sid = currentSessionId ?: return
+        thread(name = "dsh-queue") {
+            runCatching {
+                d.request(
+                    "sessions.queue",
+                    JSONObject().put("sessionId", sid).put("itemId", itemId)
+                        .put("action", JSONObject().put("kind", "remove")),
+                    12000, null,
+                )
+                queue.removeAll { it.id == itemId }
+            }.onFailure { status = "撤回失败：${it.message}" }
+        }
+    }
+
+    /** 插话：把它嵌进当前正在跑的这一轮 */
+    fun steerQueued(itemId: String) {
+        val d = dsh ?: return
+        val sid = currentSessionId ?: return
+        thread(name = "dsh-queue") {
+            runCatching {
+                d.request(
+                    "sessions.queue",
+                    JSONObject().put("sessionId", sid).put("itemId", itemId)
+                        .put("action", JSONObject().put("kind", "steer")),
+                    12000, null,
+                )
+                refreshInbox()
+            }.onFailure { status = "插话失败：${it.message}" }
+        }
+    }
+
+    /** 新建会话（协议 sessions.create，可带 workspaceId） */
+    fun createSession(onCreated: (String) -> Unit = {}) {
+        val d = dsh ?: run { status = "未连接"; return }
+        thread(name = "dsh-create") {
+            runCatching {
+                val params = JSONObject()
+                selectedWorkspaceId?.takeIf { it.isNotEmpty() }?.let { params.put("workspaceId", it) }
+                val r = d.request("sessions.create", params, 30000, null)
+                dbg("sessions.create ← " + trim(r.toString()))
+                val res = r.optJSONObject("result") ?: r
+                val sid = pick(res, "sessionId", "id")
+                loadSessions()
+                if (sid.isNotEmpty()) onCreated(sid)
+                status = "已新建会话"
+            }.onFailure { status = "新建失败：${it.message}" }
+        }
+    }
+
     /** 协议日志（数据管理页可见）—— 每帧一行，最多留 300 行 */
     val debugLog = mutableStateListOf<String>()
 
@@ -354,6 +447,7 @@ class DshController(private val appContext: Context) {
                     if (i >= 0) messages[i] = messages[i].copy(streaming = false)
                 }
                 streamingId = null
+                refreshInbox()
             }
 
             // ---------------- 用户消息
@@ -530,6 +624,14 @@ class DshController(private val appContext: Context) {
                     60000, null,
                 )
                 status = "已发送"
+                refreshInbox()
+                // host 可能会把这条排进队列：轮询几次直到信箱稳定
+                repeat(6) {
+                    kotlin.concurrent.thread {
+                        Thread.sleep(700)
+                        refreshInbox()
+                    }
+                }
             }.onFailure {
                 streaming = false
                 status = "发送失败：${it.message}"

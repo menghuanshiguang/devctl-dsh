@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import com.minis.dshconsole.ui.theme.DsRadius
 import com.minis.dshconsole.protocol.DshController
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Workspaces
 import androidx.compose.material.icons.filled.ExpandMore
 import com.minis.dshconsole.ui.DsStr
@@ -74,6 +75,7 @@ fun ChatNavigationDrawerContent(
     onOpenSession: (DshController.SessionItem) -> Unit = {},
     onOpenAccountMenu: () -> Unit = {},
     onSearch: () -> Unit = {},
+    onNewSession: () -> Unit = {},
 ) {
     val p = DshTheme.p
     Column(
@@ -85,11 +87,30 @@ fun ChatNavigationDrawerContent(
             .padding(top = DsSpacing.s3),
     ) {
         // ---------- L0 搜索
-        DsSearchBar(
-            placeholder = DsStr.searchHint,
-            icon = Icons.Filled.Search,
-            onClick = onSearch,
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = DsSpacing.screenH),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f)) {
+                DsSearchBar(
+                    placeholder = DsStr.searchHint,
+                    icon = Icons.Filled.Search,
+                    onClick = onSearch,
+                )
+            }
+            Spacer(Modifier.width(DsSpacing.s2))
+            // 新建会话（协议 sessions.create）
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(p.fill)
+                    .clickable(onClick = onNewSession),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Add, "新建会话", tint = p.textPrimary, modifier = Modifier.size(22.dp))
+            }
+        }
         Spacer(Modifier.height(DsSpacing.s2))
 
         // 诊断用计数条（一眼看出数据到底有没有到）
@@ -391,7 +412,7 @@ fun SubRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 34.dp, end = 12.dp),
+            .padding(start = 26.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 引导线

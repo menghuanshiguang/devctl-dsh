@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -125,6 +126,10 @@ fun DsDrawerLayout(
             Modifier
                 .width(drawerWidth)
                 .fillMaxHeight()
+                // ★ 遮挡修复 ★
+                // 子列表/标题行比抽屉宽时不会溢出到右侧内容下面
+                // （截图里 session-d7f0f4d0-… 那几行被内容面板盖住就是这个原因）
+                .clipToBounds()
         ) {
             drawerContent()
         }

@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.minis.dshconsole.protocol.DshController
 import com.minis.dshconsole.ui.DsStr
 import com.minis.dshconsole.ui.components.DsChip
 import com.minis.dshconsole.ui.components.DsCircleButton
@@ -114,6 +115,9 @@ fun ChatScreen(
     messages: List<ChatMessage>,
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier,
+    queue: List<DshController.QueuedItem> = emptyList(),
+    onRemoveQueued: (String) -> Unit = {},
+    onSteerQueued: (String) -> Unit = {},
     deepThink: Boolean = false,
     webSearch: Boolean = false,
     onToggleThink: () -> Unit = {},
@@ -127,6 +131,12 @@ fun ChatScreen(
         } else {
             MessageList(messages, Modifier.weight(1f))
         }
+        // 挂起消息坞（对应协议 sessions.inbox）：
+        //   嵌入中的 = 会插进当前这一轮；挂起的 = 排到下一轮
+        if (queue.isNotEmpty()) {
+            QueueDock(queue, onRemoveQueued, onSteerQueued)
+        }
+
         // 顺序与原版一致：输入卡在上、附件面板在下（截图对照修正）
         ChatInputCard(
             onSend = onSend,
@@ -531,6 +541,73 @@ private fun inlineMarkdown(src: String): AnnotatedString = buildAnnotatedString 
             }
             else -> {
                 append(src[i]); i++
+            }
+        }
+    }
+}
+
+/**
+ * 挂起消息坞 —— 发出去了但 host 还没跑的（或会被插进当前轮的）消息。
+ * 一条一行：状态标签 + 文本 + 撤回 / 插话。
+ */
+@Composable
+private fun QueueDock(
+    queue: List<DshController.QueuedItem>,
+    onRemove: (String) -> Unit,
+    onSteer: (String) -> Unit,
+) {
+    val p = DshTheme.p
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = DsSpacing.screenH, vertical = 2.dp)
+            .clip(RoundedCornerShape(DsRadius.card))
+            .background(p.fill)
+            .padding(horizontal = DsSpacing.s3, vertical = DsSpacing.s2),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        queue.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(DsRadius.pill))
+                        .background(if (item.embedded) p.brandSoft else p.surfaceContainerHighest)
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        if (item.embedded) "插话中" else "排队中",
+                        style = DsType.rowSubtitle,
+                        color = if (item.embedded) p.brand else p.textSecondary,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    item.text,
+                    style = DsType.trace,
+                    color = p.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(6.dp))
+                if (!item.embedded) {
+                    Text(
+                        "插话",
+                        style = DsType.rowSubtitle,
+                        color = p.brand,
+                        modifier = Modifier.clip(RoundedCornerShape(DsRadius.pill))
+                            .clickable { onSteer(item.id) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                Text(
+                    "撤回",
+                    style = DsType.rowSubtitle,
+                    color = p.textSecondary,
+                    modifier = Modifier.clip(RoundedCornerShape(DsRadius.pill))
+                        .clickable { onRemove(item.id) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
         }
     }
