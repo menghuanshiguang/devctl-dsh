@@ -58,6 +58,9 @@ import com.minis.dshconsole.ui.theme.DshTheme
 @Composable
 fun ChatNavigationDrawerContent(
     sessions: List<DshController.SessionItem>,
+    workspaces: List<DshController.WorkspaceItem>,
+    selectedWorkspaceId: String?,
+    onSelectWorkspace: (String) -> Unit,
     accountName: String,
     modifier: Modifier = Modifier,
     showAccount: Boolean = true,
@@ -86,6 +89,22 @@ fun ChatNavigationDrawerContent(
 
         // ---------- L1 分组 + L2 会话
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            // ---------------- L1 工作区（点了才显示它的会话）
+            if (workspaces.isNotEmpty()) {
+                item(key = "ws_header") {
+                    SessionGroupHeader(label = "工作区", showSortIcon = false)
+                }
+                itemsIndexed(workspaces, key = { _, w -> "ws_" + w.id }) { _, w ->
+                    ChatSessionItem(
+                        title = w.title.ifEmpty { w.path },
+                        selected = w.id == selectedWorkspaceId,
+                        onClick = { onSelectWorkspace(w.id) },
+                        subtitle = "${w.sessionIds.size} 个会话",
+                    )
+                }
+                item(key = "ws_gap") { Spacer(Modifier.height(DsSpacing.s3)) }
+            }
+
             if (sessions.isEmpty()) {
                 item {
                     Text(
@@ -97,7 +116,10 @@ fun ChatNavigationDrawerContent(
                 }
             } else {
                 item(key = "group_header") {
-                    SessionGroupHeader(label = "会话", showSortIcon = true)
+                    SessionGroupHeader(
+                        label = if (workspaces.isEmpty()) "会话" else "工作区会话",
+                        showSortIcon = true,
+                    )
                 }
                 itemsIndexed(sessions, key = { _, it -> it.id }) { _, it ->
                     ChatSessionItem(
@@ -172,6 +194,7 @@ fun ChatSessionItem(
     title: String,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
+    subtitle: String? = null,
     onClick: () -> Unit = {},
     onMore: () -> Unit = {},
 ) {
@@ -195,14 +218,23 @@ fun ChatSessionItem(
                 .padding(start = 6.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                title,
-                style = DsType.sessionTitle,
-                color = fg,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = DsType.sessionTitle,
+                    color = fg,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (subtitle != null) {
+                    Text(
+                        subtitle,
+                        style = DsType.rowSubtitle,
+                        color = if (selected) p.brand else p.textSecondary,
+                        maxLines = 1,
+                    )
+                }
+            }
             if (selected) {
                 Box(
                     Modifier

@@ -57,13 +57,42 @@ class DshController(private val appContext: Context) {
 
     /** 侧栏会话：id -> 标题 */
     val sessions = mutableStateListOf<SessionItem>()
+    val workspaces = mutableStateListOf<WorkspaceItem>()
+    var selectedWorkspaceId by mutableStateOf<String?>(null)
+        private set
+
+    /** 当前工作区下的会话（工作区用 sessionIds 反查；没有工作区就全部平铺） */
+    val visibleSessions: List<SessionItem>
+        get() {
+            val ws = workspaces.firstOrNull { it.id == selectedWorkspaceId } ?: return sessions
+            if (ws.sessionIds.isEmpty()) return emptyList()
+            val set = ws.sessionIds.toHashSet()
+            return sessions.filter { it.id in set }
+        }
+
+    fun selectWorkspace(id: String) {
+        selectedWorkspaceId = id
+    }
     val messages = mutableStateListOf<ChatMessage>()
     var currentSessionId by mutableStateOf<String?>(null)
         private set
     var streaming by mutableStateOf(false)
         private set
 
-    data class SessionItem(val id: String, val title: String)
+    data class SessionItem(
+        val id: String,
+        val title: String,
+        val cwd: String = "",
+        val running: Boolean = false,
+    )
+
+    /** workspaces.list 的公开投影：{ workspaceId, path, title, sessionIds[] } */
+    data class WorkspaceItem(
+        val id: String,
+        val title: String,
+        val path: String,
+        val sessionIds: List<String>,
+    )
 
     /** 正在串流的那条助手消息的 id */
     private var streamingId: String? = null
@@ -133,6 +162,36 @@ class DshController(private val appContext: Context) {
 
     private fun loadSessions() {
         val d = dsh ?: return
+        // 先拉工作区（它带 sessionIds，是分组的依据）
+        runCatching {
+            val wr = d.request("workspaces.list", JSONObject(), 20000, null)
+            dbg("workspaces.list ← " + trim(wr.toString()))
+            val wArr = pickArray(wr, "items", "workspaces")
+            val ws = ArrayList<WorkspaceItem>()
+            for (i in 0 until wArr.length()) {
+                val o = wArr.optJSONObject(i) ?: continue
+                val id = pick(o, "workspaceId", "id")
+                if (id.isEmpty()) continue
+                val idsArr = o.optJSONArray("sessionIds") ?: JSONArray()
+                val ids = ArrayList<String>()
+                for (j in 0 until idsArr.length()) idsArr.optString(j)?.let { if (it.isNotEmpty()) ids.add(it) }
+                ws.add(
+                    WorkspaceItem(
+                        id = id,
+                        title = pick(o, "title", "name").ifEmpty { pick(o, "path") },
+                        path = pick(o, "path"),
+                        sessionIds = ids,
+                    )
+                )
+            }
+            workspaces.clear()
+            workspaces.addAll(ws)
+            if (selectedWorkspaceId == null || ws.none { it.id == selectedWorkspaceId }) {
+                selectedWorkspaceId = ws.firstOrNull()?.id
+            }
+            dbg("工作区 ${ws.size} 个，选中 ${selectedWorkspaceId ?: "-"}")
+        }.onFailure { dbg("workspaces.list 失败：${it.message}") }
+
         runCatching {
             val r = d.request("sessions.list", JSONObject(), 20000, null)
             dbg("sessions.list ← " + trim(r.toString()))
@@ -140,9 +199,11 @@ class DshController(private val appContext: Context) {
             val out = ArrayList<SessionItem>()
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                val id = pick(o, "id", "sessionId", "key")
+                val id = pick(o, "sessionId", "id", "key")
                 val title = pick(o, "title", "name", "label").ifEmpty { id }
-                if (id.isNotEmpty()) out.add(SessionItem(id, title))
+                val cwd = pick(o, "cwd", "path")
+                val running = pick(o, "running") == "true"
+                if (id.isNotEmpty()) out.add(SessionItem(id, title, cwd, running))
             }
             sessions.clear()
             sessions.addAll(out)
