@@ -211,6 +211,7 @@ fun TokenStatsScreen(
     prefs: DshPrefs,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    debugLog: List<String> = emptyList(),
 ) {
     Column(
         modifier
@@ -253,6 +254,24 @@ fun TokenStatsScreen(
             DsSectionLabel("操作")
             DsGroupCard {
                 DsRow("清空统计", icon = Icons.Filled.LinkOff, showChevron = false, onClick = { prefs.resetStats() })
+            }
+            Spacer(Modifier.height(DsSpacing.cardGap))
+            DsSectionLabel("协议日志（最近 ${debugLog.size} 条）")
+            DsGroupCard {
+                if (debugLog.isEmpty()) {
+                    DsRow("暂无日志", subtitle = "连接并打开一个会话后这里会出现每一帧", showChevron = false)
+                } else {
+                    Column(Modifier.padding(DsSpacing.cardInset)) {
+                        debugLog.takeLast(60).forEach { line ->
+                            Text(
+                                line,
+                                style = DsType.rowSubtitle,
+                                color = DshTheme.p.textSecondary,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(DsSpacing.s3))
             Text(

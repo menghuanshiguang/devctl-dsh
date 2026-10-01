@@ -200,6 +200,7 @@ private fun RootBody(prefs: DshPrefs, controller: DshController) {
                 Screen.TokenStats -> TokenStatsScreen(
                     prefs = prefs,
                     onBack = { screen = Screen.Settings },
+                    debugLog = controller.debugLog,
                 )
 
                 Screen.HostInfo -> HostInfoScreen(

@@ -68,6 +68,19 @@ class DshController(private val appContext: Context) {
     /** 正在串流的那条助手消息的 id */
     private var streamingId: String? = null
 
+    /** 协议日志（数据管理页可见）—— 每帧一行，最多留 300 行 */
+    val debugLog = mutableStateListOf<String>()
+
+    private fun dbg(line: String) {
+        val t = android.util.Log.d("DshProto", line)
+        debugLog.add(line)
+        while (debugLog.size > 300) debugLog.removeAt(0)
+    }
+
+    private fun trim(s: String, n: Int = 400): String =
+        if (s.length <= n) s else s.substring(0, n) + "\u2026"
+
+
     // ---------------------------------------------------------------- 设备
 
     fun firstDevice(): Store.Dev? = store.devices("android").firstOrNull()
@@ -92,6 +105,7 @@ class DshController(private val appContext: Context) {
                 connected = true
                 hostName = d.hostName.ifEmpty { dev.name }
                 status = "已连接 ${dev.addr()}"
+                dbg("connected ${dev.addr()} host=${d.hostName}")
                 loadSessions()
             }.onFailure { e ->
                 connected = false
@@ -121,6 +135,7 @@ class DshController(private val appContext: Context) {
         val d = dsh ?: return
         runCatching {
             val r = d.request("sessions.list", JSONObject(), 20000, null)
+            dbg("sessions.list ← " + trim(r.toString()))
             val arr = pickArray(r, "sessions", "items", "list", "data")
             val out = ArrayList<SessionItem>()
             for (i in 0 until arr.length()) {
@@ -148,23 +163,53 @@ class DshController(private val appContext: Context) {
     private fun watch(sessionId: String) {
         val d = dsh ?: return
         watching.set(true)
+        dbg("watch → $sessionId")
+
+        thread(name = "dsh-tail") {
+            // ① 先拉历史（这才是消息的来源；老客户端同样用 sessions.tail）
+            runCatching {
+                val r = d.request(
+                    "sessions.tail",
+                    JSONObject().put("sessionId", sessionId),
+                    25000, null,
+                )
+                dbg("tail ← ${trim(r.toString())}")
+                val arr = pickArray(r, "records", "messages", "items", "events")
+                messages.clear()
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.let { applyRecord(it) }
+                }
+                dbg("tail 解析出 ${arr.length()} 条记录 / 消息数 ${messages.size}")
+            }.onFailure { dbg("tail 失败：${it.message}") }
+        }
+
         runCatching {
+            // ② 订阅（只 begin，不用 await —— await(id, 0) 会立刻返回 null！）
             val reqId = d.begin("sessions.watch", JSONObject().put("sessionId", sessionId))
+            dbg("watch begin id=$reqId")
+
+            // ③ 独立线程跑事件泵，idleMs 给足（老客户端用 3600000）
             watchThread = thread(name = "dsh-watch") {
-                runCatching { d.await(reqId, 0, Dsh.EvtSink { evt, data -> onEvt(evt, data) }) }
-                    .onFailure { if (connected) status = "订阅中断：${it.message}" }
-                watching.set(false)
+                runCatching {
+                    d.pump(
+                        Dsh.EvtSink { evt, data -> onEvt(evt, data) },
+                        3_600_000,
+                        Dsh.Stop { !watching.get() },
+                    )
+                }.onFailure { dbg("pump 结束：${it.message}") }
             }
         }.onFailure {
             watching.set(false)
             status = "订阅失败：${it.message}"
+            dbg("watch begin 失败：${it.message}")
         }
     }
 
     private fun onEvt(evt: String, data: JSONObject) {
         when (evt) {
-            "watch-start" -> status = "已订阅"
+            "watch-start" -> { status = "已订阅"; dbg("evt watch-start") }
             "snapshot" -> {
+                dbg("evt snapshot")
                 val arr = pickArray(data, "records", "messages", "items", "events")
                 messages.clear()
                 for (i in 0 until arr.length()) {
@@ -172,10 +217,11 @@ class DshController(private val appContext: Context) {
                 }
             }
             "event" -> {
+                dbg("evt event")
                 val rec = data.optJSONObject("record") ?: data.optJSONObject("message") ?: data
                 applyRecord(rec)
             }
-            "delta" -> applyDelta(data)
+            "delta" -> { dbg("evt delta"); applyDelta(data) }
             "tool-delta" -> applyToolDelta(data)
             "watch-end" -> {
                 streaming = false
