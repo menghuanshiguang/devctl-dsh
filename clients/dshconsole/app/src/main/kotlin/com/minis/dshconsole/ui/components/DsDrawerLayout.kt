@@ -126,14 +126,18 @@ fun DsDrawerLayout(
 
         // ---------------- 上层：主内容（右移 + 左圆角 + 左侧投影 + 可拖拽）
         val p = progress.value
-        val corner = ContentCorner * p
+        // ★ 圆角恒定，不随进度缩放 ★
+        // 对照原版逐帧：内容只移开 24% 时圆角依然很大；
+        // 我原来写 corner = ContentCorner * p，动画刚开始时半径接近 0（看着像直角），
+        // 这是与原版最明显的差异。
+        val corner = ContentCorner
 
         Box(
             Modifier
                 .fillMaxSize()
                 .offset { IntOffset((drawerPx * p).roundToInt(), 0) }
                 .shadow(
-                    elevation = ContentShadow * p,
+                    elevation = ContentShadow * p,   // 投影随进度淡入，圆角保持恒定
                     shape = RoundedCornerShape(topStart = corner, bottomStart = corner),
                     clip = false,
                 )
