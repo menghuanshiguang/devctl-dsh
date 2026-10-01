@@ -151,37 +151,6 @@ fun ChatNavigationDrawerContent(
     }
 }
 
-/** 对应 SessionGroupHeader.kt —— L1 分组头：13sp 次级灰 + 右侧排序图标 */
-@Composable
-fun SessionGroupHeader(
-    label: String,
-    modifier: Modifier = Modifier,
-    showSortIcon: Boolean = false,
-) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .padding(start = DsSpacing.screenH, end = DsSpacing.screenH)
-            .padding(top = DsSpacing.s4, bottom = DsSpacing.s1),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            style = DsType.sectionLabel,
-            color = DshTheme.p.textSecondary,
-            modifier = Modifier.weight(1f),
-        )
-        if (showSortIcon) {
-            Icon(
-                Icons.Filled.Tune,
-                "排序",
-                tint = DshTheme.p.textPlaceholder,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
 /**
  * 对应 ChatSessionItem.kt —— L2 会话条目（含选中态）
  *
