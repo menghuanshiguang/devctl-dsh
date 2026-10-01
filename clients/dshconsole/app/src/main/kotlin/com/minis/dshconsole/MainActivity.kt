@@ -56,6 +56,10 @@ import com.minis.dshconsole.ui.components.DsDrawerLayout
 import com.minis.dshconsole.ui.components.DsRow
 import com.minis.dshconsole.ui.components.DsRowDivider
 import com.minis.dshconsole.ui.components.DsTopBar
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.minis.dshconsole.ui.settings.DshPrefs
+import com.minis.dshconsole.ui.settings.HostInfoScreen
+import com.minis.dshconsole.ui.settings.TokenStatsScreen
 import com.minis.dshconsole.ui.settings.DeviceSetupScreen
 import com.minis.dshconsole.ui.settings.SettingsScreen
 import com.minis.dshconsole.ui.theme.DsSpacing
@@ -74,26 +78,36 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { DshTheme { Root() } }
+        setContent { Root() }
     }
 }
 
 private const val NEW_SESSION = "新的会话"
 
-private enum class Screen { Chat, Settings, Setup }
+private enum class Screen { Chat, Settings, Setup, TokenStats, HostInfo }
 
 @Composable
 private fun Root() {
-    
+    val ctx = LocalContext.current
+    val prefs = remember { DshPrefs(ctx.applicationContext) }
+    val controller = remember { DshController(ctx.applicationContext) }
+
+    val dark = when (prefs.themeMode) {
+        DshPrefs.ThemeMode.System -> isSystemInDarkTheme()
+        DshPrefs.ThemeMode.Light -> false
+        DshPrefs.ThemeMode.Dark -> true
+    }
+    DshTheme(darkTheme = dark, fontScale = prefs.fontScale) { RootBody(prefs, controller) }
+}
+
+@Composable
+private fun RootBody(prefs: DshPrefs, controller: DshController) {
     val scope = rememberCoroutineScope()
     var drawerOpen by remember { mutableStateOf(false) }
     var screen by remember { mutableStateOf(Screen.Chat) }
     var sessionTitle by remember { mutableStateOf(NEW_SESSION) }
     var deepThink by remember { mutableStateOf(false) }
     var webSearch by remember { mutableStateOf(false) }
-
-    val ctx = LocalContext.current
-    val controller = remember { DshController(ctx.applicationContext) }
     val messages = controller.messages
 
     // 进来就尝试连上已保存的第一台设备；没配过就直接进配置页
@@ -173,7 +187,30 @@ private fun Root() {
                 Screen.Settings -> SettingsScreen(
                     onBack = { screen = Screen.Chat },
                     onOpenDeviceSetup = { screen = Screen.Setup },
+                    onOpenTokenStats = { screen = Screen.TokenStats },
+                    onOpenHostInfo = { screen = Screen.HostInfo },
                     connectionStatus = controller.status,
+                    connected = controller.connected,
+                    hostName = controller.hostName,
+                    prefs = prefs,
+                    onDisconnect = { controller.disconnect() },
+                )
+
+                Screen.TokenStats -> TokenStatsScreen(
+                    prefs = prefs,
+                    onBack = { screen = Screen.Settings },
+                )
+
+                Screen.HostInfo -> HostInfoScreen(
+                    hostName = controller.hostName,
+                    status = controller.status,
+                    connected = controller.connected,
+                    addr = controller.firstDevice()?.let { "${it.host}:${it.port}" } ?: "",
+                    onBack = { screen = Screen.Settings },
+                    onDisconnect = {
+                        controller.disconnect()
+                        screen = Screen.Settings
+                    },
                 )
 
 

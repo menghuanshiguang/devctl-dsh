@@ -11,6 +11,8 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -106,8 +108,10 @@ object DshTheme {
 @Composable
 fun DshTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    fontScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
+    val sysDensity = LocalDensity.current
     val palette = if (darkTheme) DarkPalette else LightPalette
     val scheme = if (darkTheme) DarkScheme else LightScheme
 
@@ -125,7 +129,11 @@ fun DshTheme(
         }
     }
 
-    CompositionLocalProvider(LocalPalette provides palette) {
+    CompositionLocalProvider(
+        LocalPalette provides palette,
+        // 字体大小设置：改 fontScale 会让所有 sp 同步缩放
+        LocalDensity provides Density(sysDensity.density, fontScale),
+    ) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
