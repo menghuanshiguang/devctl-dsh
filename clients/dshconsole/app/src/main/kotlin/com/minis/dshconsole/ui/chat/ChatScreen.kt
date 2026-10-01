@@ -23,6 +23,9 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.ui.unit.sp
 import com.minis.dshconsole.R
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
