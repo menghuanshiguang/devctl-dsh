@@ -29,6 +29,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.minis.dshconsole.Store
 import com.minis.dshconsole.ui.DsStr
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import com.minis.dshconsole.ui.components.DsCircleButton
 import com.minis.dshconsole.ui.components.DsButton
 import com.minis.dshconsole.ui.components.DsGroupCard
 import com.minis.dshconsole.ui.components.DsSectionLabel
@@ -67,7 +70,15 @@ fun DeviceSetupScreen(
     ) {
         DsTopBar(
             title = "连接设备",
-            onBack = onBack,
+            left = if (onBack == null) null else ({
+                DsCircleButton(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    "返回",
+                    onBack,
+                    container = DshTheme.p.fill,
+                    tint = DshTheme.p.textPrimary,
+                )
+            }),
         )
 
         Column(
