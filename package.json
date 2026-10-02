@@ -1,6 +1,6 @@
 {
   "name": "devctl-dsh",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "private": true,
   "description": "Drive a DSH instance from another device over a token-authenticated TCP control port - the DSH half of the devctl family.",
   "keywords": [
@@ -18,6 +18,24 @@
   "author": "menghuanshiguang",
   "license": "MIT",
   "type": "module",
+  "files": [
+    "index.js",
+    "client.js",
+    "remote-web.js",
+    "qr.js",
+    "cordis.patch.yml",
+    "cli",
+    "clients",
+    "docs",
+    "host-patch",
+    "AndroidManifest.xml",
+    "screenshots.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -33,6 +51,21 @@
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings"
       ]
+    },
+    "compatibility": {
+      "dsh": "0.1.5-rc.3 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2",
+      "dshReleases": {
+        "0.1.5-rc.3": "compatible",
+        "0.1.7-rc.2": "compatible",
+        "0.2.0-rc.1": "compatible",
+        "0.2.0-rc.2": "compatible"
+      },
+      "dshOperations": {
+        "0.1.5-rc.3": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "unknown" },
+        "0.1.7-rc.2": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "unknown" },
+        "0.2.0-rc.1": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "unknown" },
+        "0.2.0-rc.2": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "unknown" }
+      }
     }
   }
 }

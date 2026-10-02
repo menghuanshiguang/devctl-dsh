@@ -314,6 +314,72 @@ New-NetFirewallRule -DisplayName "devctl-dsh" -Direction Inbound -Protocol TCP `
 
 `-RemoteAddress LocalSubnet` 把来源限制在同网段；要更紧就限定具体网段或改用 VPN 地址。
 
+## 商店准入声明（DSH-Store #1222）
+
+针对 [DSH-Store issue #1222](https://github.com/AI-Scarlett/DSH-Store/issues/1222) 的逐条整改说明。自动策略对本插件的最终状态仍是 `user-reviewed` / `blocked`（下文权限信号是功能本体，消不掉），此处保证的是：除权限信号外的每一条声明都可在固定 Commit 上被机器核验。
+
+### 分发面：manifest `files` 白名单
+
+`package.json` 的 `files` 就是分发面，逐项对应运行时闭包与说明文档：
+
+| 白名单条目 | 作用 |
+| --- | --- |
+| `index.js` / `client.js` / `remote-web.js` / `qr.js` | 运行时闭包（`index.js` 顶层 import `./qr.js` 与 `./remote-web.js`） |
+| `cordis.patch.yml` | `dsh.bundle.patch` 指向的加载器补丁（`host` / `port` / `web.port`） |
+| `cli` | `exports` 暴露的控制端 `cli/dshctl.py` |
+| `clients` / `docs` / `host-patch` / `AndroidManifest.xml` / `screenshots.json` | 文档、客户端源码与说明素材（均非运行时） |
+| `README.md` / `LICENSE` | 说明与许可 |
+
+不在白名单也不在跟踪面：`test-*.mjs` 自测脚本、`clients/*/build|out` 构建产物、`clients/dshconsole/tools` 里的 jar/keystore、`libs/arm64-v8a` 的 .so —— 这些只存在于本地开发机，固定 Commit 上没有。
+
+体积核对（`git ls-files`，74 个文件）：合计 **1,074,852 B**（上限 2,097,152 B），单文件最大 `clients/dshconsole/src/shared/com/minis/dshconsole/ChatView.java` **158,736 B**（上限 262,144 B）。
+
+### 兼容性声明
+
+- `dsh.compatibility.dsh` = 精确并集 `0.1.5-rc.3 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2`，与 `dshReleases` 里逐版本的实测结论一致。
+- `engines.node` = `>=20.0.0`。插件只在 DSH 宿主自带的 Node 里执行，验收实测于 v24.14.0；代码用到的 `node:` 内置模块与 ESM 能力不晚于 Node 20。
+- `dshOperations` 每个版本：`install` / `start` / `uninstall` = `passed`（下方验收证据），`rollback` 未做专项测试 = `unknown`，不冒充 `passed`。
+
+### 依赖与外部服务
+
+- 运行时依赖：**0**。没有 `dependencies` / `optionalDependencies` / `bundledDependencies`，没有 `preinstall` / `install` / `postinstall` / `prepare` 生命周期脚本。
+- `dsh.client.inject` 的三个 `@deepseek-ai/dsh-client-*` 是 DSH 宿主自带的客户端包，不额外从网络拉取。
+- 外部服务：**无**。插件不向公网发任何请求；cpolar 状态只是读本机 `~/.cpolar/logs` 的本地日志用于展示。局域网网页窗口与 TCP 控制端口都只在内网监听。
+
+### 权限信号（功能本体，无法通过重构消除）
+
+| 信号 | 来源 | 为什么必需 |
+| --- | --- | --- |
+| `files` | `index.js` 读写 `$DSH_HOME/devctl-dsh.json` | 状态文件保存 token 与实际监听端口，重启后保持配对 |
+| `network` | `index.js` 的 TCP 控制端口 + `remote-web.js` 的 LAN 网页窗口 | 「从另一台设备驱动 DSH」就是这两个监听 |
+| `credentials` | token 生成（`randomBytes`）与比对（`timingSafeEqual`） | 没有 token 就没有鉴权，端口等于裸奔 |
+
+三条都是插件存在的理由，改代码消不掉，因此自动策略不会给 `approved`——这与 issue 自述「高权限项目可能仍需保持 user-reviewed/blocked」一致。
+
+### 失败边界
+
+- 端口被占（`EADDRINUSE`）：只打 warning，插件不崩，DSH 正常启动，但控制端口不可用——此时需要释放 7788 或改 `cordis.patch.yml` 的 `port`。
+- 状态文件缺失/损坏：下次启动重新铸造 token 并覆盖写入，旧 token 立即失效，控制端要重新配对。
+- DSH 版本在范围外：`dshReleases` 对该版本是 `unknown`，不承诺可用，商店也不会把它当兼容证据。
+- 卸载：`dsh plugin remove devctl-dsh` 之后 Profile 组成与安装前逐字一致（验收脚本断言）。
+
+### 一次性 Profile 验收证据
+
+脚本 [`test-disposable-profile.mjs`](test-disposable-profile.mjs)：每次运行建一个临时 `DSH_HOME`（清掉带 TOKEN/SECRET/PASSWORD 的环境变量、独立 npm cache、`CI=true`），依次做 **install → 冷启动 → Host web 200 → 控制端口 hello/ping 鉴权 → uninstall 前后 dump-config 逐字对比**，最后删掉整个临时目录；不碰真实 `~/.dsh`。控制端口通过给一次性 Profile 的 `cordis.patch.yml` 插一条 `port: 0` 覆盖走 OS 随机端口（默认 7788 被开发机的真实实例占着），`web.port: 0` 关掉 LAN 窗口，验收结果从 `$DSH_HOME/devctl-dsh.json` 读实际端口后直连鉴权。
+
+```powershell
+node test-disposable-profile.mjs <该版本的 lib\bin.js> <本仓库路径>
+```
+
+2026-10-02 实测输出（每行一个版本，全部 `passed`）：
+
+```json
+{"status":"passed","dshVersion":"0.1.5-rc.3","install":true,"composition":true,"coldStart":true,"authenticatedHostHttp":200,"controlHello":true,"controlPing":true,"controlPort":51248,"uninstall":true,"disposableProfile":true}
+{"status":"passed","dshVersion":"0.1.7-rc.2","install":true,"composition":true,"coldStart":true,"authenticatedHostHttp":200,"controlHello":true,"controlPing":true,"controlPort":59518,"uninstall":true,"disposableProfile":true}
+{"status":"passed","dshVersion":"0.2.0-rc.1","install":true,"composition":true,"coldStart":true,"authenticatedHostHttp":200,"controlHello":true,"controlPing":true,"controlPort":59526,"uninstall":true,"disposableProfile":true}
+{"status":"passed","dshVersion":"0.2.0-rc.2","install":true,"composition":true,"coldStart":true,"authenticatedHostHttp":200,"controlHello":true,"controlPing":true,"controlPort":59541,"uninstall":true,"disposableProfile":true}
+```
+
 ## 文件
 
 | 路径 | 说明 |
@@ -326,7 +392,8 @@ New-NetFirewallRule -DisplayName "devctl-dsh" -Direction Inbound -Protocol TCP `
 | `docs/ish.md` | iSH / 纯命令行环境：安装、配对、无 UI 部署、排查 |
 | `docs/settings.png` | README 顶部的设置页截图 |
 | `cordis.patch.yml` | 加载器补丁：`host` / `port` |
-| `package.json` | bundle 清单 |
+| `package.json` | bundle 清单：`files` 分发白名单、`engines.node`、`dsh.compatibility` |
+| `test-disposable-profile.mjs` | 一次性 Profile 验收：install / 冷启动 / 端口鉴权 / 卸载 |
 
 ## License
 
